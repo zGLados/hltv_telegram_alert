@@ -14,7 +14,7 @@ HLTV_BASE_URL = 'https://www.hltv.org'
 HLTV_MATCHES_URL = f'{HLTV_BASE_URL}/matches'
 HLTV_RESULTS_URL = f'{HLTV_BASE_URL}/results'
 
-# User Agent für HLTV Requests
+# User Agent for HLTV Requests
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -33,4 +33,4 @@ HEADERS = {
 DATABASE_PATH = os.getenv('DATABASE_PATH', 'data/bot_data.db')
 
 # Match Wichtigkeit (Sterne auf HLTV)
-MIN_STARS_FOR_IMPORTANT = 1  # Mindestens 1 Stern für "wichtige" Spiele
+MIN_STARS_FOR_IMPORTANT = 1  # At least 1 star for "important" matches

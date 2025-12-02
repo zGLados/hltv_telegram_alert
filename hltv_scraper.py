@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class Match:
-    """Repräsentiert ein HLTV Match"""
+    """Represents an HLTV Match"""
     def __init__(self, match_id: str, team1: str, team2: str, 
                  event: str, time: Optional[datetime], stars: int, 
                  score: Optional[str] = None, status: str = "upcoming"):
@@ -34,24 +34,24 @@ class Match:
             return f"{self.team1} vs {self.team2}\n📍 {self.event}"
 
     def has_team(self, team_name: str) -> bool:
-        """Prüfe ob ein Team in diesem Match spielt"""
+        """Check if a team is playing in this match"""
         team_name_lower = team_name.lower()
         return (team_name_lower in self.team1.lower() or 
                 team_name_lower in self.team2.lower())
 
 
 class HLTVScraper:
-    """Scraper für HLTV.org"""
+    """Scraper for HLTV.org"""
     
     def __init__(self):
-        self.session = requests.Session()
+        self.session = cloudscraper.create_scraper()
         self.session.headers.update(HEADERS)
-        self._team_cache = set()  # Cache für gefundene Teams
+        self._team_cache = set()  # Cache for found teams
         self._last_request_time = 0
-        self._request_delay = 2  # Sekunden zwischen Requests
+        self._request_delay = 2  # Seconds between requests
 
     def _rate_limit(self):
-        """Rate limiting um HLTV nicht zu überlasten"""
+        """Rate limiting to avoid overloading HLTV"""
         current_time = time.time()
         time_since_last = current_time - self._last_request_time
         if time_since_last < self._request_delay:
@@ -59,7 +59,7 @@ class HLTVScraper:
         self._last_request_time = time.time()
 
     def search_team(self, team_name: str) -> bool:
-        """Prüfe ob ein Team auf HLTV existiert"""
+        """Check if a team exists on HLTV"""
         try:
             self._rate_limit()
             # Suche auf der Teams-Seite
@@ -79,7 +79,7 @@ class HLTVScraper:
                     if team_text:
                         self._team_cache.add(team_text.lower())
                 
-                # Prüfe ob der gesuchte Name in den Ergebnissen ist
+                # Check if the searched name is in the results
                 team_name_lower = team_name.lower()
                 for result in team_results:
                     result_name = result.get_text(strip=True).lower()
@@ -92,7 +92,7 @@ class HLTVScraper:
             
         except Exception as e:
             logger.error(f"Error searching for team '{team_name}': {e}")
-            # Bei Fehler erlauben wir das Team trotzdem (z.B. bei Netzwerkproblemen)
+            # On error, allow the team anyway (e.g., network issues)
             return True
 
     def get_todays_matches(self, min_stars: int = 0) -> List[Match]:
@@ -105,7 +105,7 @@ class HLTVScraper:
             soup = BeautifulSoup(response.text, 'lxml')
             matches = []
             
-            # Finde alle Match-Container für heute
+            # Find all match containers for today
             match_containers = soup.find_all('div', class_='upcomingMatch')
             
             for container in match_containers:
@@ -114,14 +114,14 @@ class HLTVScraper:
                     if match and match.stars >= min_stars:
                         matches.append(match)
                 except Exception as e:
-                    logger.error(f"Fehler beim Parsen eines Matches: {e}")
+                    logger.error(f"Error parsing a match: {e}")
                     continue
             
-            logger.info(f"{len(matches)} Matches für heute gefunden")
+            logger.info(f"Found {len(matches)} matches for today")
             return matches
             
         except Exception as e:
-            logger.error(f"Fehler beim Abrufen der Matches: {e}")
+            logger.error(f"Error fetching matches: {e}")
             return []
 
     def _parse_match_container(self, container) -> Optional[Match]:
@@ -174,7 +174,7 @@ class HLTVScraper:
             )
             
         except Exception as e:
-            logger.error(f"Fehler beim Parsen des Match-Containers: {e}")
+            logger.error(f"Error parsing match container: {e}")
             return None
 
     def _parse_time(self, time_str: str) -> Optional[datetime]:
@@ -187,11 +187,11 @@ class HLTVScraper:
                 match_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
                 return match_time
         except Exception as e:
-            logger.error(f"Fehler beim Parsen der Zeit '{time_str}': {e}")
+            logger.error(f"Error parsing time '{time_str}': {e}")
         return None
 
     def get_recent_results(self, hours: int = 24) -> List[Match]:
-        """Hole die neuesten Ergebnisse der letzten X Stunden"""
+        """Get recent results from the last X hours"""
         try:
             self._rate_limit()
             response = self.session.get(HLTV_RESULTS_URL, timeout=10)
@@ -209,14 +209,14 @@ class HLTVScraper:
                     if result:
                         results.append(result)
                 except Exception as e:
-                    logger.error(f"Fehler beim Parsen eines Ergebnisses: {e}")
+                    logger.error(f"Error parsing a result: {e}")
                     continue
             
-            logger.info(f"{len(results)} Ergebnisse gefunden")
+            logger.info(f"Found {len(results)} results")
             return results
             
         except Exception as e:
-            logger.error(f"Fehler beim Abrufen der Ergebnisse: {e}")
+            logger.error(f"Error fetching results: {e}")
             return []
 
     def _parse_result_container(self, container) -> Optional[Match]:
@@ -262,5 +262,5 @@ class HLTVScraper:
             )
             
         except Exception as e:
-            logger.error(f"Fehler beim Parsen des Result-Containers: {e}")
+            logger.error(f"Error parsing result container: {e}")
             return None
