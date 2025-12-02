@@ -1,0 +1,30 @@
+# Environment
+.env
+.venv/
+venv/
+ENV/
+
+# Database
+*.db
+*.sqlite
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Docker
+.dockerignore

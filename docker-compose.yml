@@ -1,0 +1,30 @@
+services:
+  hltv-bot:
+    build: .
+    container_name: hltv-telegram-bot
+    restart: unless-stopped
+    
+    # Environment-Variablen aus .env Datei
+    env_file:
+      - .env
+    
+    # Volume für persistente Datenbank
+    volumes:
+      - ./data:/app/data
+    
+    # Logging-Konfiguration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Ressourcen-Limits (optional)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
