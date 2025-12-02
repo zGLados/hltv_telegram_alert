@@ -15,7 +15,7 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
-            # Tabelle für Benutzer-Favoriten
+            # Table for user favorites
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS favorites (
                     user_id INTEGER,
@@ -24,7 +24,7 @@ class Database:
                 )
             ''')
             
-            # Tabelle für bereits gesendete Benachrichtigungen
+            # Table for already sent notifications
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS notifications_sent (
                     user_id INTEGER,
@@ -39,7 +39,7 @@ class Database:
             logger.info("Datenbank initialisiert")
 
     def add_favorite(self, user_id: int, team_name: str) -> bool:
-        """Füge ein Favoriten-Team hinzu"""
+        """Add a favorite team"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -50,11 +50,11 @@ class Database:
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:
-            logger.error(f"Fehler beim Hinzufügen von Favorit: {e}")
+            logger.error(f"Error adding favorite: {e}")
             return False
 
     def remove_favorite(self, user_id: int, team_name: str) -> bool:
-        """Entferne ein Favoriten-Team"""
+        """Remove a favorite team"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -65,7 +65,7 @@ class Database:
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:
-            logger.error(f"Fehler beim Entfernen von Favorit: {e}")
+            logger.error(f"Error removing favorite: {e}")
             return False
 
     def get_favorites(self, user_id: int) -> List[str]:
@@ -79,7 +79,7 @@ class Database:
                 )
                 return [row[0] for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"Fehler beim Abrufen von Favoriten: {e}")
+            logger.error(f"Error retrieving users: {e}")
             return []
 
     def get_all_users_with_favorites(self) -> Set[int]:
@@ -90,11 +90,11 @@ class Database:
                 cursor.execute('SELECT DISTINCT user_id FROM favorites')
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
-            logger.error(f"Fehler beim Abrufen von Benutzern: {e}")
+            logger.error(f"Error retrieving users: {e}")
             return set()
 
     def mark_notification_sent(self, user_id: int, match_id: str, notification_type: str):
-        """Markiere eine Benachrichtigung als gesendet"""
+        """Mark a notification as sent"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -104,10 +104,10 @@ class Database:
                 )
                 conn.commit()
         except Exception as e:
-            logger.error(f"Fehler beim Markieren der Benachrichtigung: {e}")
+            logger.error(f"Error marking notification: {e}")
 
     def was_notification_sent(self, user_id: int, match_id: str, notification_type: str) -> bool:
-        """Prüfe ob eine Benachrichtigung bereits gesendet wurde"""
+        """Check if a notification was already sent"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -117,5 +117,5 @@ class Database:
                 )
                 return cursor.fetchone() is not None
         except Exception as e:
-            logger.error(f"Fehler beim Prüfen der Benachrichtigung: {e}")
+            logger.error(f"Error checking notification: {e}")
             return False

@@ -46,8 +46,8 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("games", self.games_command))
         self.application.add_handler(CommandHandler("favorites", self.favorites_command))
         
-        # Conversation Handler für das Hinzufügen von Favoriten
-        add_fav_handler = ConversationHandler(
+        # Conversation Handler for adding favorites
+        add_conv_handler = ConversationHandler(
             entry_points=[CommandHandler("add", self.add_favorite_command)],
             states={
                 AWAITING_TEAM_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.add_favorite_finish)]
@@ -56,8 +56,8 @@ class TelegramBot:
         )
         self.application.add_handler(add_fav_handler)
         
-        # Conversation Handler für das Entfernen von Favoriten
-        remove_fav_handler = ConversationHandler(
+        # Conversation Handler for removing favorites
+        remove_conv_handler = ConversationHandler(
             entry_points=[CommandHandler("remove", self.remove_favorite_command)],
             states={
                 AWAITING_TEAM_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.remove_favorite_finish)]
@@ -70,8 +70,8 @@ class TelegramBot:
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
 
     def setup_scheduler(self):
-        """Richte geplante Tasks ein"""
-        # Tägliche Zusammenfassung
+        """Set up scheduled tasks"""
+        # Daily summary
         hour, minute = map(int, DAILY_SUMMARY_TIME.split(':'))
         self.scheduler.add_job(
             self.send_daily_summary,
@@ -79,7 +79,7 @@ class TelegramBot:
             id='daily_summary'
         )
         
-        # Überprüfe alle 30 Minuten auf Ergebnisse von Favoriten-Matches
+        # Check every 30 minutes for results of favorite matches
         self.scheduler.add_job(
             self.check_match_results,
             'interval',
@@ -363,7 +363,7 @@ class TelegramBot:
         return ConversationHandler.END
 
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler für Inline-Button Callbacks"""
+        """Handler for inline button callbacks"""
         query = update.callback_query
         await query.answer()
 
@@ -395,7 +395,7 @@ class TelegramBot:
                     parse_mode='HTML'
                 )
             except Exception as e:
-                logger.error(f"Fehler beim Senden an User {user_id}: {e}")
+                logger.error(f"Error sending to user {user_id}: {e}")
 
     async def check_match_results(self):
         """Check results of favorite team matches"""
@@ -430,7 +430,7 @@ class TelegramBot:
                                 )
                                 db.mark_notification_sent(user_id, result.match_id, 'result')
                             except Exception as e:
-                                logger.error(f"Fehler beim Senden an User {user_id}: {e}")
+                                logger.error(f"Error sending to user {user_id}: {e}")
 
     def run(self):
         """Start the bot"""

@@ -1,237 +1,246 @@
 # 🎮 HLTV Telegram Alert Bot
 
-Ein Telegram Bot, der dich über die wichtigsten CS:GO/CS2-Matches auf HLTV.org informiert und Benachrichtigungen über deine Lieblingsteams sendet.
+A Telegram bot that keeps you informed about the most important CS:GO/CS2 matches on HLTV.org and sends notifications about your favorite teams.
 
 ## Features
 
-✅ **Tägliche Match-Übersicht** - Erhalte jeden Morgen eine Zusammenfassung der wichtigsten Matches des Tages  
-✅ **Lieblingsteams verwalten** - Füge deine Favoriten-Teams hinzu und erhalte Benachrichtigungen  
-✅ **Live-Ergebnisse** - Automatische Updates wenn Spiele deiner Lieblingsteams enden  
-✅ **Sterne-Filter** - Nur wichtige Matches (basierend auf HLTV Stern-Rating)  
-✅ **Einfache Bedienung** - Intuitive Commands zur Verwaltung
+✅ **Daily Match Overview** - Get a morning summary of the most important matches of the day  
+✅ **Manage Favorite Teams** - Add your favorite teams and receive notifications  
+✅ **Live Results** - Automatic updates when your favorite teams' matches end  
+✅ **Star Filter** - Only important matches (based on HLTV star rating)  
+✅ **Easy to Use** - Intuitive commands for management
 
 ## Installation
 
-### Option 1: Mit Docker (Empfohlen) 🐳
+### Option 1: With Docker (Recommended) 🐳
 
-**Voraussetzungen:**
-- Docker und Docker Compose installiert
+**Prerequisites:**
+- Docker and Docker Compose installed
 
-**Schritte:**
+**Steps:**
 
-1. **Repository klonen**
+1. **Clone Repository**
    ```bash
    git clone https://github.com/zGLados/hltv_telegram_alert.git
    cd hltv_telegram_alert
    ```
 
-2. **Telegram Bot erstellen**
-   - Öffne Telegram und suche nach [@BotFather](https://t.me/BotFather)
-   - Sende `/newbot` und folge den Anweisungen
-   - Kopiere den API-Token
+2. **Create Telegram Bot**
+   - Open Telegram and search for [@BotFather](https://t.me/BotFather)
+   - Send `/newbot` and follow the instructions
+   - Copy the API token
 
-3. **Konfiguration**
+3. **Configuration**
    ```bash
    cp .env.example .env
    ```
-   Bearbeite `.env` und trage deinen Bot-Token ein:
+   Edit `.env` and enter your bot token:
    ```env
-   TELEGRAM_BOT_TOKEN=dein_bot_token_hier
+   TELEGRAM_BOT_TOKEN=your_bot_token_here
    TIMEZONE=Europe/Berlin
    DAILY_SUMMARY_TIME=09:00
    ```
 
-4. **Bot starten**
+4. **Start Bot**
    ```bash
    ./start.sh
    ```
    
-   Oder manuell:
+   Or manually:
    ```bash
    docker compose up -d
    ```
 
-5. **Logs anzeigen**
+5. **View Logs**
    ```bash
    docker compose logs -f
    ```
 
-6. **Bot stoppen**
+6. **Stop Bot**
    ```bash
    docker compose down
    ```
 
-### Option 2: Ohne Docker
+### Option 2: Without Docker
 
-**Voraussetzungen:**
-- Python 3.12 oder höher
+**Prerequisites:**
+- Python 3.12 or higher
 
-**Schritte:**
+**Steps:**
 
-### 1. Repository klonen
+### 1. Clone Repository
 
 ```bash
 git clone https://github.com/zGLados/hltv_telegram_alert.git
 cd hltv_telegram_alert
 ```
 
-### 2. Python-Umgebung einrichten
+### 2. Set up Python Environment
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Auf Windows: .venv\Scripts\activate
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
 
-### 3. Abhängigkeiten installieren
+### 3. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Telegram Bot erstellen
+### 4. Create Telegram Bot
 
-1. Öffne Telegram und suche nach [@BotFather](https://t.me/BotFather)
-2. Sende `/newbot` und folge den Anweisungen
-3. Kopiere den API-Token, den du erhältst
+1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
+2. Send `/newbot` and follow the instructions
+3. Copy the API token you receive
 
-### 5. Konfiguration
+### 5. Configuration
 
-Erstelle eine `.env` Datei im Projektverzeichnis:
+Create a `.env` file in the project directory:
 
 ```bash
 cp .env.example .env
 ```
 
-Bearbeite die `.env` Datei und füge deinen Bot-Token ein:
+Edit the `.env` file and add your bot token:
 
 ```env
-TELEGRAM_BOT_TOKEN=dein_bot_token_hier
+TELEGRAM_BOT_TOKEN=your_bot_token_here
 TIMEZONE=Europe/Berlin
 DAILY_SUMMARY_TIME=09:00
 ```
 
-## Verwendung
+## Usage
 
-### Bot starten
+### Start Bot
 
 ```bash
 python bot.py
 ```
 
-Der Bot läuft nun und ist über Telegram erreichbar!
+The bot is now running and accessible via Telegram!
 
-### Verfügbare Commands
+### Available Commands
 
-| Command | Beschreibung |
-|---------|--------------|
-| `/start` | Begrüßungsnachricht und Übersicht |
-| `/help` | Hilfe und Anleitung |
-| `/today` | Zeigt die wichtigsten Matches von heute |
-| `/favorites` | Zeigt deine Lieblingsteams |
-| `/add` | Füge ein Lieblingsteam hinzu |
-| `/remove` | Entferne ein Lieblingsteam |
+| Command | Description |
+|---------|-------------|
+| `/start` | Welcome message and overview |
+| `/help` | Help and instructions |
+| `/today` | Shows today's most important matches |
+| `/games` | Shows next match for each favorite team |
+| `/favorites` | Shows your favorite teams |
+| `/add` | Add a favorite team |
+| `/remove` | Remove a favorite team |
 
-### Beispiel-Workflow
+### Example Workflow
 
-1. Starte den Bot mit `/start`
-2. Füge deine Lieblingsteams hinzu:
+1. Start the bot with `/start`
+2. Add your favorite teams:
+   ```
+   /add FaZe
+   ```
+   Or use bulk add:
    ```
    /add
    FaZe
+   BIG
+   Vitality
+   done
    ```
-3. Prüfe die heutigen Matches:
+3. Check today's matches:
    ```
    /today
    ```
-4. Der Bot sendet automatisch:
-   - Tägliche Zusammenfassung um 09:00 Uhr
-   - Benachrichtigungen über Spiele deiner Favoriten
-   - Ergebnisse nach Spielende
+4. The bot automatically sends:
+   - Daily summary at 09:00 AM
+   - Notifications about your favorites' matches
+   - Results after matches end
 
-## Konfiguration
+## Configuration
 
-In der `config.py` kannst du folgende Einstellungen anpassen:
+In `config.py` you can adjust the following settings:
 
-- `MIN_STARS_FOR_IMPORTANT`: Mindestanzahl an Sternen für "wichtige" Matches (Standard: 1)
-- `DAILY_SUMMARY_TIME`: Zeit für die tägliche Zusammenfassung (Standard: 09:00)
-- `TIMEZONE`: Zeitzone für Benachrichtigungen (Standard: Europe/Berlin)
+- `MIN_STARS_FOR_IMPORTANT`: Minimum number of stars for "important" matches (default: 1)
+- `DAILY_SUMMARY_TIME`: Time for daily summary (default: 09:00)
+- `TIMEZONE`: Timezone for notifications (default: Europe/Berlin)
 
-## Automatische Benachrichtigungen
+## Automatic Notifications
 
-Der Bot überprüft:
-- **Täglich um 09:00 Uhr**: Sendet eine Zusammenfassung aller wichtigen Matches
-- **Alle 30 Minuten**: Überprüft ob Spiele deiner Lieblingsteams beendet wurden
+The bot checks:
+- **Daily at 09:00 AM**: Sends a summary of all important matches
+- **Every 30 minutes**: Checks if your favorite teams' matches have ended
 
-## Technische Details
+## Technical Details
 
-### Architektur
+### Architecture
 
 ```
-├── bot.py              # Hauptdatei mit Bot-Logik
-├── hltv_scraper.py    # HLTV.org Scraper
-├── database.py        # SQLite Datenbank-Verwaltung
-├── config.py          # Konfiguration
-└── requirements.txt   # Python-Abhängigkeiten
+├── bot.py              # Main file with bot logic
+├── hltv_scraper.py    # HLTV.org scraper
+├── database.py        # SQLite database management
+├── config.py          # Configuration
+└── requirements.txt   # Python dependencies
 ```
 
-### Verwendete Technologien
+### Technologies Used
 
 - **python-telegram-bot** - Telegram Bot API
-- **BeautifulSoup4** - Web Scraping
-- **APScheduler** - Zeitgesteuerte Aufgaben
-- **SQLite** - Datenbank für Benutzer-Favoriten
+- **BeautifulSoup4** - Web scraping
+- **APScheduler** - Scheduled tasks
+- **SQLite** - Database for user favorites
 
-## Fehlerbehebung
+## Troubleshooting
 
-### Bot antwortet nicht
+### Bot doesn't respond
 
-1. Prüfe ob der Bot läuft: `python bot.py`
-2. Überprüfe den Token in der `.env` Datei
-3. Stelle sicher, dass du mit dem Bot in Telegram eine Konversation gestartet hast (`/start`)
+1. Check if the bot is running: `python bot.py`
+2. Verify the token in the `.env` file
+3. Make sure you've started a conversation with the bot in Telegram (`/start`)
 
-### Keine Matches gefunden
+### No matches found
 
-- HLTV.org könnte temporär nicht erreichbar sein
-- Überprüfe deine Internetverbindung
-- Möglicherweise gibt es heute keine wichtigen Matches
+- HLTV.org might be temporarily unavailable
+- Check your internet connection
+- There might be no important matches today
+- **Note:** HLTV.org uses aggressive anti-scraping protection, so matches may not be available
 
-### Benachrichtigungen kommen nicht an
+### Notifications not arriving
 
-- Stelle sicher, dass du Favoriten hinzugefügt hast (`/favorites`)
-- Überprüfe die Zeitzone in der `.env` Datei
-- Prüfe ob deine Lieblingsteams heute spielen
+- Make sure you've added favorites (`/favorites`)
+- Check the timezone in the `.env` file
+- Verify your favorite teams are playing today
 
 ## Deployment
 
-### Docker (Produktiv-Umgebung)
+### Docker (Production Environment)
 
-Der Bot läuft bereits als Docker-Container wenn du `./start.sh` oder `docker-compose up -d` verwendet hast.
+The bot is already running as a Docker container if you used `./start.sh` or `docker compose up -d`.
 
-**Nützliche Befehle:**
+**Useful Commands:**
 
 ```bash
-# Status prüfen
+# Check status
 docker compose ps
 
-# Logs anzeigen
+# View logs
 docker compose logs -f
 
-# Bot neu starten
+# Restart bot
 docker compose restart
 
-# Bot stoppen
+# Stop bot
 docker compose down
 
-# Container neu bauen
+# Rebuild container
 docker compose up --build -d
 
-# In Container einloggen (für Debugging)
+# Enter container (for debugging)
 docker compose exec hltv-bot /bin/bash
 ```
 
-### Systemd Service (ohne Docker)
+### Systemd Service (without Docker)
 
-Erstelle `/etc/systemd/system/hltv-bot.service`:
+Create `/etc/systemd/system/hltv-bot.service`:
 
 ```ini
 [Unit]
@@ -240,40 +249,40 @@ After=network.target
 
 [Service]
 Type=simple
-User=dein_username
-WorkingDirectory=/pfad/zum/hltv_telegram_alert
-Environment="PATH=/pfad/zum/hltv_telegram_alert/.venv/bin"
-ExecStart=/pfad/zum/hltv_telegram_alert/.venv/bin/python bot.py
+User=your_username
+WorkingDirectory=/path/to/hltv_telegram_alert
+Environment="PATH=/path/to/hltv_telegram_alert/.venv/bin"
+ExecStart=/path/to/hltv_telegram_alert/.venv/bin/python bot.py
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Aktivieren:
+Enable:
 ```bash
 sudo systemctl enable hltv-bot
 sudo systemctl start hltv-bot
 ```
 
-### Server-Deployment mit Docker
+### Server Deployment with Docker
 
-Für einen produktiven Server empfiehlt sich:
+For a production server, it's recommended to:
 
-1. **Automatischer Start nach Reboot:**
+1. **Automatic start after reboot:**
    
-   Die `docker-compose.yml` verwendet bereits `restart: unless-stopped`
+   The `docker-compose.yml` already uses `restart: unless-stopped`
 
-2. **Backup der Datenbank:**
+2. **Database backup:**
    ```bash
-   # Backup erstellen
+   # Create backup
    docker compose exec hltv-bot cp /app/data/bot_data.db /app/data/backup_$(date +%Y%m%d).db
    
-   # Oder vom Host
+   # Or from host
    cp data/bot_data.db data/backup_$(date +%Y%m%d).db
    ```
 
-3. **Updates einspielen:**
+3. **Deploy updates:**
    ```bash
    git pull
    docker compose down
@@ -282,29 +291,29 @@ Für einen produktiven Server empfiehlt sich:
 
 4. **Monitoring:**
    ```bash
-   # Ressourcen-Nutzung
+   # Resource usage
    docker stats hltv-telegram-bot
    
-   # Logs der letzten Stunde
+   # Last hour's logs
    docker compose logs --since 1h
    ```
 
-### Mit Docker Swarm oder Kubernetes
+### With Docker Swarm or Kubernetes
 
-Für Swarm:
+For Swarm:
 ```bash
 docker stack deploy -c docker-compose.yml hltv-bot
 ```
 
-Für Kubernetes kannst du die Docker-Images verwenden und entsprechende Deployments erstellen.
+For Kubernetes, you can use the Docker images and create appropriate deployments.
 
-### Mit Docker (manuell ohne Compose)
+### With Docker (manually without Compose)
 
 ```bash
-# Image bauen
+# Build image
 docker build -t hltv-bot .
 
-# Container starten
+# Start container
 docker run -d \
   --name hltv-telegram-bot \
   --restart unless-stopped \
@@ -312,22 +321,22 @@ docker run -d \
   --env-file .env \
   hltv-bot
 
-# Logs anzeigen
+# View logs
 docker logs -f hltv-telegram-bot
 
-# Stoppen
+# Stop
 docker stop hltv-telegram-bot
 docker rm hltv-telegram-bot
 ```
 
-## Lizenz
+## License
 
 MIT License
 
-## Mitwirken
+## Contributing
 
-Pull Requests sind willkommen! Für größere Änderungen öffne bitte zuerst ein Issue.
+Pull requests are welcome! For major changes, please open an issue first.
 
 ## Disclaimer
 
-Dieser Bot ist ein inoffizielles Projekt und nicht mit HLTV.org verbunden. Verwende ihn verantwortungsvoll und überlaste die HLTV.org Server nicht.
+This bot is an unofficial project and is not affiliated with HLTV.org. Use it responsibly and don't overload HLTV.org servers. **Please note:** HLTV.org uses aggressive anti-scraping protection (Cloudflare), so automatic match fetching may not always work reliably.
