@@ -16,6 +16,7 @@ A Telegram bot that keeps you informed about the most important CS:GO/CS2 matche
 
 **Prerequisites:**
 - Docker and Docker Compose installed
+- For WSL2 users: Docker Desktop with WSL2 integration enabled
 
 **Steps:**
 
@@ -33,8 +34,9 @@ A Telegram bot that keeps you informed about the most important CS:GO/CS2 matche
 3. **Configuration**
    ```bash
    cp .env.example .env
+   nano .env  # or use any text editor
    ```
-   Edit `.env` and enter your bot token:
+   Enter your bot token:
    ```env
    TELEGRAM_BOT_TOKEN=your_bot_token_here
    TIMEZONE=Europe/Berlin
@@ -43,12 +45,12 @@ A Telegram bot that keeps you informed about the most important CS:GO/CS2 matche
 
 4. **Start Bot**
    ```bash
-   ./start.sh
+   ./docker-start.sh
    ```
    
    Or manually:
    ```bash
-   docker compose up -d
+   docker compose up --build -d
    ```
 
 5. **View Logs**
@@ -60,6 +62,8 @@ A Telegram bot that keeps you informed about the most important CS:GO/CS2 matche
    ```bash
    docker compose down
    ```
+
+For detailed Docker instructions and troubleshooting, see [DOCKER.md](DOCKER.md)
 
 ### Option 2: Without Docker
 
@@ -127,6 +131,7 @@ The bot is now running and accessible via Telegram!
 | `/start` | Welcome message and overview |
 | `/help` | Help and instructions |
 | `/today` | Shows today's most important matches |
+| `/alltoday` | Shows ALL matches for today (no star filter) |
 | `/games` | Shows next match for each favorite team |
 | `/favorites` | Shows your favorite teams |
 | `/add` | Add a favorite team |
@@ -168,7 +173,15 @@ In `config.py` you can adjust the following settings:
 
 The bot checks:
 - **Daily at 09:00 AM**: Sends a summary of all important matches
-- **Every 30 minutes**: Checks if your favorite teams' matches have ended
+- **Every 30 minutes**: Checks if your favorite teams' matches have ended and refreshes match cache
+
+### Smart Caching System
+
+The bot uses an intelligent caching system to ensure fast responses and accurate data:
+- Match data is cached for 30 minutes
+- Match dates/times are fetched directly from HLTV match pages for accuracy
+- Cache is automatically refreshed every 30 minutes
+- Important matches (1+ stars) have their dates pre-loaded during cache refresh
 
 ## Technical Details
 
@@ -185,9 +198,10 @@ The bot checks:
 ### Technologies Used
 
 - **python-telegram-bot** - Telegram Bot API
-- **BeautifulSoup4** - Web scraping
-- **APScheduler** - Scheduled tasks
-- **SQLite** - Database for user favorites
+- **cloudscraper** - Bypassing Cloudflare protection on HLTV
+- **BeautifulSoup4** - Web scraping and HTML parsing
+- **APScheduler** - Scheduled tasks (daily summaries, cache refresh)
+- **SQLite** - Database for user favorites and notification tracking
 
 ## Troubleshooting
 
