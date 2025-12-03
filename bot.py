@@ -43,6 +43,7 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("today", self.today_command))
+        self.application.add_handler(CommandHandler("alltoday", self.alltoday_command))
         self.application.add_handler(CommandHandler("games", self.games_command))
         self.application.add_handler(CommandHandler("favorites", self.favorites_command))
         
@@ -102,6 +103,24 @@ class TelegramBot:
             run_date=datetime.now() + timedelta(seconds=10),
             id='initial_cache_warmup'
         )
+    
+    async def setup_bot_commands(self):
+        """Set bot commands via Telegram API"""
+        from telegram import BotCommand
+        
+        commands = [
+            BotCommand("start", "Welcome message and overview"),
+            BotCommand("today", "Show today's important matches"),
+            BotCommand("alltoday", "Show ALL matches for today"),
+            BotCommand("games", "Show upcoming games for your favorite teams"),
+            BotCommand("favorites", "Show your favorite teams"),
+            BotCommand("add", "Add a favorite team"),
+            BotCommand("remove", "Remove a favorite team"),
+            BotCommand("help", "Show help and instructions"),
+        ]
+        
+        await self.application.bot.set_my_commands(commands)
+        logger.info("Bot commands updated successfully")
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler for /start Command"""
@@ -110,6 +129,7 @@ class TelegramBot:
             "I keep you informed about the most important CS:GO matches of the day "
             "<b>Available Commands:</b>\n"
             "/today - Show today's important matches\n"
+            "/alltoday - Show ALL matches for today\n"
             "/games - Show upcoming games for your favorite teams\n"
             "/favorites - Show your favorite teams\n"
             "/add - Add a favorite team\n"
@@ -126,6 +146,7 @@ class TelegramBot:
             "<b>🎮 HLTV CS:GO Match Bot - Help</b>\n\n"
             "<b>Commands:</b>\n\n"
             "/today - Shows all important matches for today\n\n"
+            "/alltoday - Shows ALL matches for today (no star filter)\n\n"
             "/games - Shows upcoming games for your favorite teams\n\n"
             "/favorites - Shows your list of favorite teams\n\n"
             "/add - Add a new favorite team. You'll be notified about all games "
@@ -169,6 +190,60 @@ class TelegramBot:
         for match in today_matches:
             stars = "⭐" * match.stars
             message += f"{stars}\n{match}\n\n"
+        
+        await update.message.reply_text(message, parse_mode='HTML')
+
+    async def alltoday_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handler for /alltoday Command - shows ALL matches for today"""
+        await update.message.reply_text("🔍 Searching for all matches today...")
+        
+        # Get all matches (min_stars=0 means no filter)
+        matches = scraper.get_todays_matches(min_stars=0, use_cache=True)
+        
+        if not matches:
+            await update.message.reply_text(
+                "No matches found. 😔"
+            )
+            return
+        
+        # Filter to only show matches happening today
+        today = datetime.now().date()
+        today_matches = [m for m in matches if m.time and m.time.date() == today]
+        
+        if not today_matches:
+            await update.message.reply_text(
+                f"No matches found for today ({today.strftime('%d.%m.%Y')}). 😔\n"
+                f"There are {len(matches)} upcoming matches, but they are on other days."
+            )
+            return
+        
+        # Sort by time (soonest first), then by stars
+        today_matches.sort(key=lambda m: (m.time if m.time else datetime.max, -m.stars))
+        
+        # Build message with grouping by star rating
+        message = f"<b>🎮 All Matches Today ({today.strftime('%d.%m.%Y')}):</b>\n"
+        message += f"<i>Total: {len(today_matches)} matches</i>\n\n"
+        
+        # Group by stars for better overview
+        by_stars = {}
+        for match in today_matches:
+            if match.stars not in by_stars:
+                by_stars[match.stars] = []
+            by_stars[match.stars].append(match)
+        
+        # Show in descending star order
+        for stars in sorted(by_stars.keys(), reverse=True):
+            star_matches = by_stars[stars]
+            stars_str = "⭐" * stars if stars > 0 else "◾"
+            message += f"<b>{stars_str} {len(star_matches)} match{'es' if len(star_matches) != 1 else ''}:</b>\n"
+            
+            for match in star_matches[:10]:  # Limit to first 10 per category
+                time_str = match.time.strftime('%H:%M') if match.time else 'TBA'
+                message += f"{time_str} | {match.team1} vs {match.team2}\n"
+            
+            if len(star_matches) > 10:
+                message += f"<i>... and {len(star_matches) - 10} more</i>\n"
+            message += "\n"
         
         await update.message.reply_text(message, parse_mode='HTML')
 
@@ -480,6 +555,11 @@ class TelegramBot:
         """Start the bot"""
         logger.info("Starting bot...")
         self.scheduler.start()
+        
+        # Set bot commands on startup
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(self.setup_bot_commands())
+        
         self.application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

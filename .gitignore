@@ -25,6 +25,3 @@ __pycache__/
 # Logs
 *.log
 logs/
-
-# Docker
-.dockerignore

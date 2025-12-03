@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Database (will be mounted as volume)
+data/
+*.db
+*.sqlite
+
+# Logs
+*.log
+logs/
+bot.log
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Scripts
+run_without_docker.sh
+start.sh
+
+# Documentation
+README.md
+.env.example
