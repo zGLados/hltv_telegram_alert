@@ -1,6 +1,6 @@
 # 🎮 HLTV Telegram Alert Bot
 
-A Telegram bot that keeps you informed about the most important CS:GO/CS2 matches on HLTV.org and sends notifications about your favorite teams.
+A Telegram bot that keeps you informed about the most important CS2 matches on HLTV.org and sends notifications about your favorite teams.
 
 ## 🤖 Public Bot Instance
 
@@ -236,7 +236,7 @@ The bot uses an intelligent caching system to ensure fast responses and accurate
 
 ### Team Validation
 
-The bot includes a database with 259 CS:GO/CS2 teams from HLTV rankings. When you add a team:
+The bot includes a database with 259 CS2 teams from HLTV rankings. When you add a team:
 - Team names are validated against the database (case-insensitive)
 - Correct capitalization is automatically applied (e.g., `flyquest` → `FlyQuest`)
 - Teams are updated daily from HLTV (when accessible)
