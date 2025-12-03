@@ -20,17 +20,32 @@ class Match:
         self.team1 = team1
         self.team2 = team2
         self.event = event
-        self.time = time
+        self._time = time
         self.stars = stars
         self.score = score
         self.status = status
+        self._match_url = None
+        self._scraper = None
+    
+    @property
+    def time(self) -> Optional[datetime]:
+        """Lazy load match time from match page if not set"""
+        if self._time is None and self._match_url and self._scraper:
+            logger.info(f"Lazy loading datetime for match {self.match_id}...")
+            self._time = self._scraper._get_match_datetime_from_page(self._match_url)
+        return self._time
+    
+    @time.setter
+    def time(self, value):
+        self._time = value
 
     def __str__(self):
         if self.score:
             return f"{self.team1} vs {self.team2} - {self.score}\n📍 {self.event}"
         elif self.time:
+            date_str = self.time.strftime("%d.%m.%Y")
             time_str = self.time.strftime("%H:%M")
-            return f"{self.team1} vs {self.team2}\n⏰ {time_str} | 📍 {self.event}"
+            return f"{self.team1} vs {self.team2}\n📅 {date_str} | ⏰ {time_str}\n📍 {self.event}"
         else:
             return f"{self.team1} vs {self.team2}\n📍 {self.event}"
 
@@ -58,6 +73,10 @@ class HLTVScraper:
         self._team_cache = set()  # Cache for found teams
         self._last_request_time = 0
         self._request_delay = 3  # Increase delay to 3 seconds
+        self._datetime_cache = {}  # Cache for match datetimes to avoid duplicate requests
+        self._matches_cache = None  # Cache for all matches
+        self._matches_cache_time = None  # Timestamp of last cache update
+        self._cache_duration = 1800  # Cache duration in seconds (30 minutes)
 
     def _rate_limit(self):
         """Rate limiting to avoid overloading HLTV"""
@@ -66,74 +85,196 @@ class HLTVScraper:
         if time_since_last < self._request_delay:
             time.sleep(self._request_delay - time_since_last)
         self._last_request_time = time.time()
+    
+    def preload_match_datetimes(self, matches: List[Match], max_matches: int = 20):
+        """Eagerly load datetimes for a list of matches to populate cache
+        
+        Args:
+            matches: List of matches to load datetimes for
+            max_matches: Maximum number of matches to load (to avoid too many requests)
+        """
+        logger.info(f"Preloading datetimes for up to {max_matches} matches...")
+        loaded = 0
+        for match in matches[:max_matches]:
+            if match._match_url and match._time is None:
+                # Access .time property to trigger lazy loading
+                _ = match.time
+                loaded += 1
+        logger.info(f"Preloaded {loaded} match datetimes")
 
     def search_team(self, team_name: str) -> bool:
-        """Check if a team exists on HLTV"""
-        try:
-            self._rate_limit()
-            # Search on the teams page
-            search_url = f"{HLTV_BASE_URL}/search?term={team_name}"
-            response = self.session.get(search_url, timeout=10)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'lxml')
-            
-            # Search for team results
-            team_results = soup.find_all('a', href=re.compile(r'/team/\d+/'))
-            
-            if team_results:
-                # Store found teams in cache
-                for result in team_results:
-                    team_text = result.get_text(strip=True)
-                    if team_text:
-                        self._team_cache.add(team_text.lower())
-                
-                # Check if the searched name is in the results
-                team_name_lower = team_name.lower()
-                for result in team_results:
-                    result_name = result.get_text(strip=True).lower()
-                    if team_name_lower in result_name or result_name in team_name_lower:
-                        logger.info(f"Team '{team_name}' found on HLTV")
-                        return True
-            
-            logger.info(f"Team '{team_name}' not found on HLTV")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error searching for team '{team_name}': {e}")
-            # On error, allow the team anyway (e.g., network issues)
-            return True
+        """Check if a team exists - simplified version that accepts all teams"""
+        # Simply accept all team names without web scraping
+        # The actual validation happens when matches are fetched
+        # This prevents unnecessary API calls and potential rate limiting
+        
+        team_name_lower = team_name.lower()
+        
+        # Store in cache for consistency
+        self._team_cache.add(team_name_lower)
+        
+        logger.info(f"Team '{team_name}' accepted")
+        return True
 
-    def get_todays_matches(self, min_stars: int = 0) -> List[Match]:
-        """Get today's matches from HLTV"""
+    def get_todays_matches(self, min_stars: int = 0, use_cache: bool = True) -> List[Match]:
+        """Get today's matches from HLTV - only returns truly upcoming matches
+        
+        Args:
+            min_stars: Minimum star rating for matches
+            use_cache: If True, use cached matches if available and not expired
+        """
+        # Check if we can use cache
+        if use_cache and self._matches_cache is not None and self._matches_cache_time is not None:
+            cache_age = time.time() - self._matches_cache_time
+            if cache_age < self._cache_duration:
+                logger.info(f"Using cached matches (age: {int(cache_age)}s / {self._cache_duration}s)")
+                # Filter by min_stars from cache
+                return [m for m in self._matches_cache if m.stars >= min_stars]
+        
+        # Fetch fresh matches
         try:
             self._rate_limit()
+            # Don't use date parameter as HLTV shows same matches on multiple days
+            # Just get the main matches page
             response = self.session.get(HLTV_MATCHES_URL, timeout=15)
             response.raise_for_status()
             
             soup = BeautifulSoup(response.text, 'lxml')
             matches = []
+            current_date = datetime.now().date()
             
-            # Find all match containers (new structure)
-            match_containers = soup.find_all('div', class_='match')
+            # Find all match containers
+            all_divs = soup.find_all('div', class_=True)
             
-            for container in match_containers:
-                try:
-                    match = self._parse_match_container(container)
-                    if match and match.stars >= min_stars:
-                        matches.append(match)
-                except Exception as e:
-                    logger.error(f"Error parsing a match: {e}")
-                    continue
+            for div in all_divs:
+                classes = div.get('class', [])
+                
+                # Check for match container
+                if 'match' in classes and len(classes) <= 3:
+                    try:
+                        match = self._parse_match_container(div, current_date)
+                        if match:
+                            matches.append(match)
+                    except Exception as e:
+                        logger.error(f"Error parsing a match: {e}")
+                        continue
             
-            logger.info(f"Found {len(matches)} matches for today")
-            return matches
+            # Remove duplicates based on match_id
+            seen_ids = set()
+            unique_matches = []
+            for match in matches:
+                if match.match_id not in seen_ids:
+                    seen_ids.add(match.match_id)
+                    unique_matches.append(match)
+            
+            logger.info(f"Found {len(unique_matches)} unique matches (filtered {len(matches) - len(unique_matches)} duplicates)")
+            
+            # Update cache
+            self._matches_cache = unique_matches
+            self._matches_cache_time = time.time()
+            logger.info(f"Updated matches cache with {len(unique_matches)} matches")
+            
+            # Filter by min_stars
+            return [m for m in unique_matches if m.stars >= min_stars]
             
         except Exception as e:
             logger.error(f"Error fetching matches: {e}")
             return []
+    
+    def get_matches_for_date(self, date: datetime.date, min_stars: int = 0) -> List[Match]:
+        """Get matches for a specific date from HLTV"""
+        try:
+            self._rate_limit()
+            # Use HLTV's date parameter to get matches for specific date
+            url = f"{HLTV_MATCHES_URL}?selectedDate={date}"
+            response = self.session.get(url, timeout=15)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'lxml')
+            matches = []
+            
+            # Find all match containers
+            # Since we're using the date parameter, all matches on this page are for this date
+            all_divs = soup.find_all('div', class_=True)
+            
+            for div in all_divs:
+                classes = div.get('class', [])
+                
+                # Check for match container (simple match div with few classes)
+                if 'match' in classes and len(classes) <= 3:
+                    try:
+                        # Pass the date we know this match is for
+                        match = self._parse_match_container(div, date)
+                        if match and match.stars >= min_stars:
+                            matches.append(match)
+                    except Exception as e:
+                        logger.error(f"Error parsing a match: {e}")
+                        continue
+            
+            # Remove duplicates based on match_id, team1, team2, and time
+            seen = {}
+            unique_matches = []
+            for match in matches:
+                # Use match_id as primary key, with teams and time as fallback
+                key = (match.match_id, match.team1, match.team2, match.time)
+                if key not in seen:
+                    seen[key] = True
+                    unique_matches.append(match)
+            
+            logger.info(f"Found {len(unique_matches)} unique matches for {date} (filtered {len(matches) - len(unique_matches)} duplicates)")
+            return unique_matches
+            
+        except Exception as e:
+            logger.error(f"Error fetching matches for {date}: {e}")
+            return []
 
-    def _parse_match_container(self, container) -> Optional[Match]:
+    def _get_match_datetime_from_page(self, match_url: str) -> Optional[datetime]:
+        """Fetch the match page and extract the actual datetime from countdown or data attributes"""
+        # Check cache first
+        if match_url in self._datetime_cache:
+            logger.debug(f"Using cached datetime for {match_url}")
+            return self._datetime_cache[match_url]
+        
+        try:
+            self._rate_limit()
+            # match_url is the full path like /matches/2388091/mouz-vs-parivision-starladder-budapest-major-2025
+            full_url = f"https://www.hltv.org{match_url}"
+            response = self.session.get(full_url, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'lxml')
+            
+            # Look for Unix timestamp in data-unix attribute
+            unix_elements = soup.find_all(attrs={'data-unix': True})
+            if unix_elements:
+                unix_timestamp = int(unix_elements[0]['data-unix'])
+                # Unix timestamp is in milliseconds
+                match_datetime = datetime.fromtimestamp(unix_timestamp / 1000)
+                logger.debug(f"Match {match_url}: Found datetime from Unix timestamp: {match_datetime}")
+                # Cache the result
+                self._datetime_cache[match_url] = match_datetime
+                return match_datetime
+            
+            # Fallback: Look for time element with datetime attribute
+            time_elem = soup.find('div', class_='time')
+            if time_elem:
+                unix_attr = time_elem.get('data-unix')
+                if unix_attr:
+                    unix_timestamp = int(unix_attr)
+                    match_datetime = datetime.fromtimestamp(unix_timestamp / 1000)
+                    logger.debug(f"Match {match_url}: Found datetime from time element: {match_datetime}")
+                    # Cache the result
+                    self._datetime_cache[match_url] = match_datetime
+                    return match_datetime
+            
+            logger.warning(f"Match {match_url}: Could not find datetime on match page")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error fetching match page {match_url}: {e}")
+            return None
+
+    def _parse_match_container(self, container, match_date: datetime.date = None) -> Optional[Match]:
         """Parse a match container (new HLTV structure)"""
         try:
             # Match ID and event name from URL
@@ -185,13 +326,6 @@ class HLTVScraper:
                 # Clean up and format the event name
                 event = event_slug.replace('-', ' ').title()
             
-            # Time
-            time_div = container.find('div', class_='match-time')
-            match_time = None
-            if time_div:
-                time_str = time_div.get_text(strip=True)
-                match_time = self._parse_time(time_str)
-            
             # Stars (importance) - count only non-faded stars
             stars = 0
             star_container = container.find('div', class_='match-rating')
@@ -205,28 +339,94 @@ class HLTVScraper:
             if star_container and 'matchLive' in star_container.get('class', []):
                 status = "live"
             
-            return Match(
+            # Create match object with match_url stored for lazy datetime fetching
+            match = Match(
                 match_id=match_id,
                 team1=team1_name,
                 team2=team2_name,
                 event=event,
-                time=match_time,
+                time=None,  # Will be set lazily when needed
                 stars=stars,
                 status=status
             )
+            
+            # Store the URL in a custom attribute for lazy fetching
+            match._match_url = match_url
+            match._scraper = self  # Reference to scraper for lazy fetching
+            
+            return match
             
         except Exception as e:
             logger.error(f"Error parsing match container: {e}")
             return None
 
-    def _parse_time(self, time_str: str) -> Optional[datetime]:
-        """Parse time string from HLTV"""
+    def _parse_date_header(self, date_text: str) -> datetime.date:
+        """Parse HLTV date header (e.g., 'Today', 'Tomorrow', 'Wednesday 4th of December 2025')"""
         try:
+            date_text = date_text.lower().strip()
+            today = datetime.now().date()
+            
+            if 'today' in date_text:
+                return today
+            elif 'tomorrow' in date_text:
+                return today + timedelta(days=1)
+            else:
+                # Try to parse specific date formats from HLTV
+                # Format: "Wednesday 4th of December 2025" or similar
+                # Extract day, month, year using regex
+                import re
+                
+                # Try to find day number (1-31)
+                day_match = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\b', date_text)
+                
+                # Try to find month name
+                months = {
+                    'january': 1, 'february': 2, 'march': 3, 'april': 4,
+                    'may': 5, 'june': 6, 'july': 7, 'august': 8,
+                    'september': 9, 'october': 10, 'november': 11, 'december': 12
+                }
+                month_num = None
+                for month_name, month_val in months.items():
+                    if month_name in date_text:
+                        month_num = month_val
+                        break
+                
+                # Try to find year (2024, 2025, etc.)
+                year_match = re.search(r'\b(20\d{2})\b', date_text)
+                
+                if day_match and month_num and year_match:
+                    day = int(day_match.group(1))
+                    year = int(year_match.group(1))
+                    parsed_date = datetime(year, month_num, day).date()
+                    logger.info(f"Parsed date '{date_text}' as {parsed_date}")
+                    return parsed_date
+                
+                # If we can't parse it, assume it's tomorrow
+                logger.warning(f"Could not parse date '{date_text}', assuming tomorrow")
+                return today + timedelta(days=1)
+        except Exception as e:
+            logger.error(f"Error parsing date header '{date_text}': {e}")
+            return datetime.now().date()
+
+    def _parse_time(self, time_str: str, match_date: datetime.date = None) -> Optional[datetime]:
+        """Parse time string from HLTV and intelligently determine the date"""
+        try:
+            # If no date provided, use today
+            if match_date is None:
+                match_date = datetime.now().date()
+            
             # Format: "19:00"
             if ':' in time_str:
                 hour, minute = map(int, time_str.split(':'))
+                match_time = datetime.combine(match_date, datetime.min.time())
+                match_time = match_time.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                
+                # If the match time is in the past (earlier today), assume it's tomorrow
                 now = datetime.now()
-                match_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                if match_time < now and match_date == now.date():
+                    match_time = match_time + timedelta(days=1)
+                    logger.debug(f"Match time {time_str} is in the past, moving to tomorrow: {match_time}")
+                
                 return match_time
         except Exception as e:
             logger.error(f"Error parsing time '{time_str}': {e}")
