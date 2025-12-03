@@ -7,7 +7,9 @@ ENV/
 # Database
 *.db
 *.sqlite
-data/
+data/*
+# But include the initial database template with teams (no user data)
+!data/initial_bot_data.db
 
 # Python
 __pycache__/

@@ -11,9 +11,10 @@ venv/
 ENV/
 
 # Database (will be mounted as volume)
-data/
-*.db
-*.sqlite
+data/bot_data.db
+data/*.sqlite
+# Exception: Include template database in image
+!data/initial_bot_data.db
 
 # Logs
 *.log
