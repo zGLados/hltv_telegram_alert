@@ -60,20 +60,22 @@ start_bot() {
     check_env
     create_data_dir
     
-    # Pull latest changes from git
-    if [ -d .git ]; then
-        echo -e "${BLUE}📥 Pulling latest changes from git...${NC}"
-        git pull
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}✅ Git pull successful${NC}"
-        else
-            echo -e "${YELLOW}⚠️  Git pull failed - continuing with local version${NC}"
+    # Check for --pull flag
+    if [ "$1" = "--pull" ]; then
+        if [ -d .git ]; then
+            echo -e "${BLUE}📥 Pulling latest changes from git...${NC}"
+            git pull
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✅ Git pull successful${NC}"
+            else
+                echo -e "${YELLOW}⚠️  Git pull failed - continuing with local version${NC}"
+            fi
+            echo ""
         fi
-        echo ""
     fi
     
-    echo -e "${BLUE}🐳 Building and starting Docker container...${NC}"
-    $DOCKER_COMPOSE up --build -d
+    echo -e "${BLUE}🐳 Starting Docker container...${NC}"
+    $DOCKER_COMPOSE up -d
     
     if [ $? -eq 0 ]; then
         echo ""
@@ -135,18 +137,6 @@ rebuild_bot() {
     
     check_env
     
-    # Pull latest changes from git
-    if [ -d .git ]; then
-        echo -e "${BLUE}📥 Pulling latest changes from git...${NC}"
-        git pull
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}✅ Git pull successful${NC}"
-        else
-            echo -e "${YELLOW}⚠️  Git pull failed - continuing with local version${NC}"
-        fi
-        echo ""
-    fi
-    
     echo -e "${YELLOW}Stopping existing containers...${NC}"
     $DOCKER_COMPOSE down
     
@@ -205,30 +195,32 @@ down_bot() {
 
 show_help() {
     show_header
-    echo "Usage: ./docker.sh [command]"
+    echo "Usage: ./docker.sh [command] [options]"
     echo ""
     echo "Commands:"
-    echo "  start       Start the bot"
-    echo "  stop        Stop the bot"
-    echo "  restart     Restart the bot"
-    echo "  rebuild     Rebuild and restart the bot"
-    echo "  status      Show container status"
-    echo "  logs        Show last 50 log lines"
-    echo "  logs -f     Show live logs (follow)"
-    echo "  down        Stop and remove containers"
-    echo "  help        Show this help"
+    echo "  start            Start the bot"
+    echo "  start --pull     Pull latest changes from git, then start"
+    echo "  stop             Stop the bot"
+    echo "  restart          Restart the bot"
+    echo "  rebuild          Rebuild and restart the bot"
+    echo "  status           Show container status"
+    echo "  logs             Show last 50 log lines"
+    echo "  logs -f          Show live logs (follow)"
+    echo "  down             Stop and remove containers"
+    echo "  help             Show this help"
     echo ""
     echo "Examples:"
     echo "  ./docker.sh start"
+    echo "  ./docker.sh start --pull"
     echo "  ./docker.sh logs -f"
-    echo "  ./docker.sh restart"
+    echo "  ./docker.sh rebuild"
     echo ""
 }
 
 # Main
 case "$1" in
     start)
-        start_bot
+        start_bot "$2"
         ;;
     stop)
         stop_bot
