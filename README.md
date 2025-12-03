@@ -262,8 +262,11 @@ The bot is already running as a Docker container if you used `./docker.sh start`
 The `docker.sh` script provides easy container management:
 
 ```bash
-# Start bot (pulls latest git changes, builds, and starts)
+# Start bot
 ./docker.sh start
+
+# Start bot and pull latest changes from git first
+./docker.sh start --pull
 
 # Stop bot
 ./docker.sh stop
@@ -271,7 +274,10 @@ The `docker.sh` script provides easy container management:
 # Restart bot (quick restart without rebuild)
 ./docker.sh restart
 
-# Rebuild bot (pulls git changes, full rebuild)
+# Restart bot and pull latest changes (git pull + rebuild + restart)
+./docker.sh restart --pull
+
+# Rebuild bot (full rebuild without git pull)
 ./docker.sh rebuild
 
 # View logs
@@ -352,8 +358,8 @@ For a production server, it's recommended to:
 
 3. **Deploy updates:**
    ```bash
-   # Using docker.sh (automatically pulls git changes)
-   ./docker.sh rebuild
+   # Using docker.sh (automatically pulls git changes and rebuilds)
+   ./docker.sh restart --pull
    
    # Or manually
    git pull
