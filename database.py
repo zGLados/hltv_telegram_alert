@@ -43,6 +43,14 @@ class Database:
                 )
             ''')
             
+            # Table for valid teams
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS valid_teams (
+                    team_name TEXT PRIMARY KEY,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
             conn.commit()
             logger.info("Datenbank initialisiert")
 
@@ -155,3 +163,45 @@ class Database:
         except Exception as e:
             logger.error(f"Error getting min_stars: {e}")
             return 1
+
+    def update_valid_teams(self, teams: Set[str]):
+        """Update the list of valid teams in database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                # Clear old teams
+                cursor.execute('DELETE FROM valid_teams')
+                # Insert new teams
+                cursor.executemany(
+                    'INSERT INTO valid_teams (team_name) VALUES (?)',
+                    [(team,) for team in teams]
+                )
+                conn.commit()
+                logger.info(f"Updated valid teams list with {len(teams)} teams")
+        except Exception as e:
+            logger.error(f"Error updating valid teams: {e}")
+
+    def get_valid_teams(self) -> Set[str]:
+        """Get all valid teams from database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT team_name FROM valid_teams')
+                return {row[0] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Error getting valid teams: {e}")
+            return set()
+
+    def is_valid_team(self, team_name: str) -> bool:
+        """Check if a team is in the valid teams list"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT 1 FROM valid_teams WHERE team_name = ? COLLATE NOCASE',
+                    (team_name.lower(),)
+                )
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking valid team: {e}")
+            return False

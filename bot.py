@@ -29,6 +29,7 @@ AWAITING_TEAM_NAME = 1
 # Globale Instanzen
 db = Database(DATABASE_PATH)
 scraper = HLTVScraper()
+scraper.set_database(db)  # Connect database to scraper for team validation
 
 
 class TelegramBot:
@@ -436,28 +437,29 @@ class TelegramBot:
         if context.args and len(context.args) > 0:
             team_name = ' '.join(context.args).strip()
             
-            # Search for team on HLTV
-            await update.message.reply_text(f"🔍 Searching for '{team_name}' on HLTV...")
+            # Search for team
+            await update.message.reply_text(f"🔍 Searching for '{team_name}'...")
             
-            if not scraper.search_team(team_name):
+            found, correct_name = scraper.search_team(team_name)
+            if not found:
                 await update.message.reply_text(
-                    f"❌ Team '{team_name}' not found on HLTV.\n\n"
+                    f"❌ Team '{team_name}' not found.\n\n"
                     "Possible reasons:\n"
                     "• Team doesn't exist or is spelled incorrectly\n"
-                    "• HLTV is currently unavailable\n\n"
+                    "• Team database is not loaded\n\n"
                     "Please check the spelling or try again later.\n"
                     "Examples: FaZe, Navi, G2, Vitality, BIG, MOUZ"
                 )
                 return ConversationHandler.END
             
-            if db.add_favorite(user_id, team_name):
+            if db.add_favorite(user_id, correct_name):
                 await update.message.reply_text(
-                    f"✅ {team_name} has been added to your favorites!\n\n"
+                    f"✅ {correct_name} has been added to your favorites!\n\n"
                     "You'll now be notified about all games and results of this team."
                 )
             else:
                 await update.message.reply_text(
-                    f"❌ {team_name} is already in your favorites."
+                    f"❌ {correct_name} is already in your favorites."
                 )
             return ConversationHandler.END
         else:
@@ -492,15 +494,16 @@ class TelegramBot:
         results = []
         
         for team_name in team_names:
-            # Search for team on HLTV
-            if not scraper.search_team(team_name):
-                results.append(f"❌ {team_name} - not found on HLTV")
+            # Search for team
+            found, correct_name = scraper.search_team(team_name)
+            if not found:
+                results.append(f"❌ {team_name} - not found")
                 continue
             
-            if db.add_favorite(user_id, team_name):
-                results.append(f"✅ {team_name} - added to favorites")
+            if db.add_favorite(user_id, correct_name):
+                results.append(f"✅ {correct_name} - added to favorites")
             else:
-                results.append(f"ℹ️ {team_name} - already in favorites")
+                results.append(f"ℹ️ {correct_name} - already in favorites")
         
         # Send summary
         message = "<b>Results:</b>\n\n" + "\n".join(results)
@@ -675,11 +678,15 @@ class TelegramBot:
             logger.error(f"Error refreshing match cache: {e}")
     
     async def load_teams(self):
-        """Load/refresh the team list from HLTV"""
+        """Load/refresh the team list from HLTV and update database"""
         try:
             logger.info("Loading team list from HLTV...")
             teams = scraper.get_all_teams(use_cache=False)
-            logger.info(f"Loaded {len(teams)} teams from HLTV")
+            
+            if teams:
+                logger.info(f"Loaded {len(teams)} teams from HLTV into database")
+            else:
+                logger.warning("HLTV scraping failed - no teams loaded. Team validation will not work until teams are loaded.")
         except Exception as e:
             logger.error(f"Error loading team list: {e}")
 

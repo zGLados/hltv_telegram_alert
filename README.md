@@ -215,11 +215,15 @@ The bot uses an intelligent caching system to ensure fast responses and accurate
 ### Architecture
 
 ```
-├── bot.py              # Main file with bot logic
-├── hltv_scraper.py    # HLTV.org scraper
-├── database.py        # SQLite database management
-├── config.py          # Configuration
-└── requirements.txt   # Python dependencies
+├── bot.py                    # Main file with bot logic
+├── hltv_scraper.py          # HLTV.org scraper
+├── database.py              # SQLite database management
+├── config.py                # Configuration
+├── init_db_with_teams.py    # Script to initialize database with teams
+├── requirements.txt         # Python dependencies
+└── data/
+    ├── initial_bot_data.db  # Pre-loaded database with 259 teams
+    └── bot_data.db          # Runtime database (created automatically)
 ```
 
 ### Technologies Used
@@ -228,7 +232,38 @@ The bot uses an intelligent caching system to ensure fast responses and accurate
 - **cloudscraper** - Bypassing Cloudflare protection on HLTV
 - **BeautifulSoup4** - Web scraping and HTML parsing
 - **APScheduler** - Scheduled tasks (daily summaries, cache refresh)
-- **SQLite** - Database for user favorites and notification tracking
+- **SQLite** - Database for user favorites, notification tracking, and team validation
+
+### Team Validation
+
+The bot includes a database with 259 CS:GO/CS2 teams from HLTV rankings. When you add a team:
+- Team names are validated against the database (case-insensitive)
+- Correct capitalization is automatically applied (e.g., `flyquest` → `FlyQuest`)
+- Teams are updated daily from HLTV (when accessible)
+- Initial database is included in the repository for immediate use
+
+**Updating the Team Database:**
+
+If you want to update the team list with current HLTV rankings:
+
+1. **Download HLTV Rankings Page:**
+   - Visit https://www.hltv.org/ranking/teams in your browser
+   - Right-click → "Save page as..." → Save as HTML
+   - Save as `Counter-Strike Ranking _ World Ranking _ HLTV.org.htm` in project root
+
+2. **Run Update Script:**
+   ```bash
+   python3 init_db_with_teams.py
+   ```
+   This creates a fresh `data/initial_bot_data.db` with all teams from the HTML file.
+
+3. **Commit Updated Database:**
+   ```bash
+   git add data/initial_bot_data.db
+   git commit -m "Update team database to current HLTV rankings"
+   ```
+
+**Note:** This is only needed when you want to update the template database for all users. The bot automatically attempts to update teams daily from HLTV, but due to Cloudflare protection this often fails. The pre-loaded database ensures all 259 teams work immediately.
 
 ## Troubleshooting
 
@@ -237,6 +272,13 @@ The bot uses an intelligent caching system to ensure fast responses and accurate
 1. Check if the bot is running: `python bot.py`
 2. Verify the token in the `.env` file
 3. Make sure you've started a conversation with the bot in Telegram (`/start`)
+
+### Team not found
+
+- Check spelling - team names must match HLTV rankings
+- The database contains 259 teams from HLTV's world rankings
+- Use `/add teamname` with common names like: FaZe, Navi, G2, Vitality, BIG, MOUZ, M80, FlyQuest
+- If HLTV scraping is blocked, the bot uses the pre-loaded team database
 
 ### No matches found
 

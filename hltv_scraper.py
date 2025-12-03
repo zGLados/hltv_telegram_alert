@@ -10,26 +10,6 @@ from config import HLTV_BASE_URL, HLTV_MATCHES_URL, HLTV_RESULTS_URL, HEADERS
 
 logger = logging.getLogger(__name__)
 
-# Fallback list of top teams (updated regularly)
-# This list is used when HLTV is unavailable due to Cloudflare blocking
-TOP_TEAMS_FALLBACK = {
-    # Top 30 teams as of December 2025
-    'spirit', 'faze', 'navi', 'vitality', 'g2', 'mouz', 'liquid',
-    'heroic', 'eternal fire', 'complexity', 'virtus.pro', 'big', 
-    'cloud9', 'pain', 'imperial', 'furia', 'flyquest', 'saw',
-    'mibr', 'monte', 'gamerlegion', '3dmax', 'ence', 'b8', 
-    'lynn vision', 'rare atom', 'betboom', 'nemiga', 'passion ua',
-    'kr', 'oddik', 'tyloo', 'ecstatic', 'falcons', 'aurora',
-    # Additional common teams
-    'astralis', 'nip', 'fnatic', 'vp', 'og', 'outsiders',
-    'apeks', 'party astronauts', 'nouns', 'legacy', 'grayhound',
-    '9z', 'fluxo', 'red canids', 'sharks', 'los kogutos',
-    'amkal', 'forze', 'sinners', 'sprout', 'preasy', 'endpoint',
-    'alternate attax', 'koi', '9 pandas', 'zero tenacity',
-    'ihc', 'mongolz', 'atox', 'talon', 'grayhound gaming',
-}
-
-
 class Match:
     """Represents an HLTV Match"""
     def __init__(self, match_id: str, team1: str, team2: str, 
@@ -137,6 +117,11 @@ class HLTVScraper:
         self._all_teams = None  # Cache for all teams from HLTV rankings
         self._teams_cache_time = None  # Timestamp of last team list update
         self._teams_cache_duration = 86400  # Teams cache duration: 24 hours
+        self.db = None  # Database instance for team validation
+
+    def set_database(self, db):
+        """Set database instance for team validation"""
+        self.db = db
 
     def _rate_limit(self):
         """Rate limiting to avoid overloading HLTV"""
@@ -246,6 +231,11 @@ class HLTVScraper:
                 self._all_teams = teams
                 self._teams_cache_time = time.time()
                 logger.info(f"Successfully scraped {len(teams)} teams from HLTV")
+                
+                # Update database with teams
+                if self.db:
+                    self.db.update_valid_teams(teams)
+                    logger.info(f"Updated database with {len(teams)} valid teams")
             else:
                 logger.warning("No teams found, using old cache if available")
                 if self._all_teams:
@@ -260,71 +250,70 @@ class HLTVScraper:
         
         return teams if teams else set()
 
-    def search_team(self, team_name: str) -> bool:
-        """Check if a team exists by validating against HLTV team list
+    def search_team(self, team_name: str) -> tuple[bool, str]:
+        """Check if a team exists by validating against database
         
         Args:
             team_name: Name of the team to search for
             
         Returns:
-            True if team exists, False otherwise
+            Tuple of (exists: bool, correct_name: str)
+            - If team exists: (True, "Correct Team Name")
+            - If team doesn't exist: (False, original_input)
         """
-        team_name_lower = team_name.lower().strip()
+        team_name_input = team_name.strip()
+        team_name_lower = team_name_input.lower()
         
         # Basic validation - reject obviously invalid names
         if len(team_name_lower) < 2:
             logger.warning(f"Team name '{team_name}' too short (min 2 characters)")
-            return False
+            return (False, team_name_input)
         
         if len(team_name_lower) > 30:
             logger.warning(f"Team name '{team_name}' too long (max 30 characters)")
-            return False
+            return (False, team_name_input)
         
         # Reject names that are only numbers
         if team_name_lower.isdigit():
             logger.warning(f"Team name '{team_name}' cannot be only numbers")
-            return False
+            return (False, team_name_input)
         
         # Reject names with too many special characters
         special_char_count = sum(1 for c in team_name_lower if not c.isalnum() and c not in [' ', '-', '.', '_'])
         if special_char_count > 3:
             logger.warning(f"Team name '{team_name}' has too many special characters")
-            return False
+            return (False, team_name_input)
         
-        # Get all teams from HLTV
-        all_teams = self.get_all_teams()
+        # Try database first if available
+        if self.db:
+            valid_teams = self.db.get_valid_teams()
+            if valid_teams:
+                # Exact match (case-insensitive)
+                for team in valid_teams:
+                    if team_name_lower == team.lower():
+                        logger.info(f"Team '{team_name}' found in database (exact match) -> '{team}'")
+                        return (True, team)
+                
+                # Partial match
+                matches = [team for team in valid_teams if team_name_lower in team.lower() or team.lower() in team_name_lower]
+                if matches:
+                    if len(matches) == 1:
+                        logger.info(f"Team '{team_name}' found in database as '{matches[0]}' (partial match)")
+                        return (True, matches[0])
+                    else:
+                        # Multiple matches - accept close ones
+                        for match in matches:
+                            match_lower = match.lower()
+                            if team_name_lower == match_lower or match_lower.startswith(team_name_lower) or team_name_lower.startswith(match_lower):
+                                logger.info(f"Team '{team_name}' accepted from database as '{match}'")
+                                return (True, match)
+                
+                logger.warning(f"Team '{team_name}' not found in database ({len(valid_teams)} teams)")
+                return (False, team_name_input)
         
-        if not all_teams:
-            # If scraping failed, use fallback list of top teams
-            logger.warning(f"HLTV unavailable, using fallback team list ({len(TOP_TEAMS_FALLBACK)} teams)")
-            all_teams = TOP_TEAMS_FALLBACK
-        
-        # Exact match
-        if team_name_lower in all_teams:
-            logger.info(f"Team '{team_name}' found (exact match)")
-            self._team_cache.add(team_name_lower)
-            return True
-        
-        # Partial match - check if search term is contained in any team name
-        matches = [team for team in all_teams if team_name_lower in team or team in team_name_lower]
-        
-        if matches:
-            if len(matches) == 1:
-                logger.info(f"Team '{team_name}' found as '{matches[0]}' (partial match)")
-                self._team_cache.add(team_name_lower)
-                return True
-            else:
-                # Multiple matches found
-                logger.info(f"Multiple teams found for '{team_name}': {', '.join(matches[:5])}")
-                # Accept if any match is very close
-                for match in matches:
-                    if team_name_lower == match or match.startswith(team_name_lower) or team_name_lower.startswith(match):
-                        logger.info(f"Team '{team_name}' accepted as '{match}'")
-                        self._team_cache.add(team_name_lower)
-                        return True
-        
-        logger.warning(f"Team '{team_name}' not found in team list ({len(all_teams)} teams checked)")
-        return False
+        # No database or database is empty - reject the team
+        logger.error(f"No valid teams in database, cannot validate '{team_name}'")
+        return (False, team_name_input)
 
     def get_todays_matches(self, min_stars: int = 0, use_cache: bool = True) -> List[Match]:
         """Get today's matches from HLTV - only returns truly upcoming matches
