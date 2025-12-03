@@ -43,8 +43,8 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("today", self.today_command))
-        self.application.add_handler(CommandHandler("alltoday", self.alltoday_command))
-        self.application.add_handler(CommandHandler("games", self.games_command))
+        self.application.add_handler(CommandHandler("favgames", self.favgames_command))
+        self.application.add_handler(CommandHandler("setminstar", self.setminstar_command))
         self.application.add_handler(CommandHandler("favorites", self.favorites_command))
         
         # Conversation Handler for adding favorites
@@ -111,8 +111,8 @@ class TelegramBot:
         commands = [
             BotCommand("start", "Welcome message and overview"),
             BotCommand("today", "Show today's important matches"),
-            BotCommand("alltoday", "Show ALL matches for today"),
-            BotCommand("games", "Show upcoming games for your favorite teams"),
+            BotCommand("favgames", "Show upcoming games for your favorite teams"),
+            BotCommand("setminstar", "Set minimum star rating 1-5 (e.g., /setminstar 2)"),
             BotCommand("favorites", "Show your favorite teams"),
             BotCommand("add", "Add a favorite team"),
             BotCommand("remove", "Remove a favorite team"),
@@ -140,8 +140,8 @@ class TelegramBot:
             "I keep you informed about the most important CS:GO matches of the day "
             "<b>Available Commands:</b>\n"
             "/today - Show today's important matches\n"
-            "/alltoday - Show ALL matches for today\n"
-            "/games - Show upcoming games for your favorite teams\n"
+            "/favgames - Show upcoming games for your favorite teams\n"
+            "/setminstar <number> - Set minimum star rating (1-5)\n"
             "/favorites - Show your favorite teams\n"
             "/add - Add a favorite team\n"
             "/remove - Remove a favorite team\n"
@@ -156,110 +156,198 @@ class TelegramBot:
         help_text = (
             "<b>🎮 HLTV CS:GO Match Bot - Help</b>\n\n"
             "<b>Commands:</b>\n\n"
-            "/today - Shows all important matches for today\n\n"
-            "/alltoday - Shows ALL matches for today (no star filter)\n\n"
-            "/games - Shows upcoming games for your favorite teams\n\n"
+            "/today - Shows today's important matches (based on your star rating)\n\n"
+            "/favgames - Shows upcoming games for your favorite teams\n\n"
+            "/setminstar <number> - Set minimum star rating (1-5)\n"
+            "  Example: /setminstar 2\n\n"
             "/favorites - Shows your list of favorite teams\n\n"
-            "/add - Add a new favorite team. You'll be notified about all games "
-            "and results of this team\n\n"
+            "/add - Add a new favorite team\n\n"
             "/remove - Remove a team from your favorites\n\n"
             "<b>Automatic Notifications:</b>\n"
-            "• Daily summary at 09:00\n"
-            "• Notifications about your favorite teams' games\n"
-            "• Results after match ends\n\n"
+            "• Daily summary at 09:00 (respects your star rating setting)\n"
+            "• Notifications about your favorite teams' games\n\n"
             "Have fun! 🎯"
         )
         await update.message.reply_text(help_text, parse_mode='HTML')
 
     async def today_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler for /today Command"""
-        await update.message.reply_text("🔍 Searching for today's important matches...")
+        """Handler for /today Command - shows important matches today (based on user's min_stars setting)"""
+        user_id = update.effective_user.id
+        min_stars = db.get_min_stars(user_id)
         
-        matches = scraper.get_todays_matches(min_stars=MIN_STARS_FOR_IMPORTANT)
+        await update.message.reply_text(f"🔍 Searching for matches with {min_stars}+ stars...")
         
-        if not matches:
-            await update.message.reply_text(
-                "No important matches found. 😔"
-            )
-            return
-        
-        # Filter to only show matches happening today
         today = datetime.now().date()
-        today_matches = [m for m in matches if m.time and m.time.date() == today]
         
-        if not today_matches:
+        # Get upcoming important matches
+        upcoming_matches = scraper.get_todays_matches(min_stars=min_stars)
+        upcoming_today = [m for m in upcoming_matches if m.time and m.time.date() == today]
+        
+        # Get today's results (filter for important ones)
+        results = scraper.get_recent_results(hours=24)
+        important_results = [r for r in results if r.stars >= min_stars]
+        
+        # Combine both
+        all_important = []
+        
+        # Add finished matches
+        for result in important_results:
+            all_important.append({
+                'match': result,
+                'status': 'finished'
+            })
+        
+        # Add upcoming matches
+        for match in upcoming_today:
+            all_important.append({
+                'match': match,
+                'status': 'upcoming'
+            })
+        
+        if not all_important:
             await update.message.reply_text(
-                f"No important matches found for today ({today.strftime('%d.%m.%Y')}). 😔\n"
-                f"There are {len(matches)} upcoming matches, but they are on other days."
+                f"No matches with {min_stars}+ stars found for today. 😔\n"
+                f"Use /setminstar <number> to change the minimum rating."
             )
             return
         
-        # Sort by time (soonest first), then by stars (most important first)
-        today_matches.sort(key=lambda m: (m.time if m.time else datetime.max, -m.stars))
+        # Build message
+        message = f"<b>⭐ Important Matches Today ({today.strftime('%d.%m.%Y')}):</b>\n"
+        message += f"<i>Total: {len(all_important)} matches ({min_stars}+ stars)</i>\n\n"
         
-        message = f"<b>⭐ Important Matches Today ({today.strftime('%d.%m.%Y')}):</b>\n\n"
-        for match in today_matches:
-            stars = "⭐" * match.stars
-            message += f"{stars}\n{match}\n\n"
+        # Show finished matches first
+        finished = [item for item in all_important if item['status'] == 'finished']
+        upcoming = [item for item in all_important if item['status'] == 'upcoming']
         
-        await update.message.reply_text(message, parse_mode='HTML')
+        if finished:
+            message += "<b>✅ Finished:</b>\n\n"
+            for item in finished:
+                result = item['match']
+                message += f"{result.format_for_telegram()}\n\n"
+        
+        if upcoming:
+            message += "<b>🕐 Upcoming:</b>\n\n"
+            # Sort by time
+            upcoming.sort(key=lambda x: x['match'].time if x['match'].time else datetime.max)
+            for item in upcoming:
+                match = item['match']
+                message += f"{match.format_for_telegram()}\n\n"
+        
+        await update.message.reply_text(message, parse_mode='HTML', disable_web_page_preview=True)
 
     async def alltoday_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler for /alltoday Command - shows ALL matches for today"""
+        """Handler for /alltoday Command - shows ALL matches for today (upcoming + finished)"""
         await update.message.reply_text("🔍 Searching for all matches today...")
         
-        # Get all matches (min_stars=0 means no filter)
-        matches = scraper.get_todays_matches(min_stars=0, use_cache=True)
-        
-        if not matches:
-            await update.message.reply_text(
-                "No matches found. 😔"
-            )
-            return
-        
-        # Filter to only show matches happening today
         today = datetime.now().date()
-        today_matches = [m for m in matches if m.time and m.time.date() == today]
         
-        if not today_matches:
+        # Get upcoming matches
+        upcoming_matches = scraper.get_todays_matches(min_stars=0, use_cache=True)
+        upcoming_today = [m for m in upcoming_matches if m.time and m.time.date() == today]
+        
+        # Get today's results
+        results = scraper.get_recent_results(hours=24)
+        
+        # Combine both lists
+        all_matches = []
+        
+        # Add results first (mark them as finished)
+        for result in results:
+            all_matches.append({
+                'match': result,
+                'status': 'finished',
+                'sort_key': 0  # Finished matches sort first
+            })
+        
+        # Add upcoming matches
+        for match in upcoming_today:
+            all_matches.append({
+                'match': match,
+                'status': 'upcoming',
+                'sort_key': match.time.timestamp() if match.time else float('inf')
+            })
+        
+        if not all_matches:
             await update.message.reply_text(
-                f"No matches found for today ({today.strftime('%d.%m.%Y')}). 😔\n"
-                f"There are {len(matches)} upcoming matches, but they are on other days."
+                f"No matches found for today ({today.strftime('%d.%m.%Y')}). 😔"
             )
             return
-        
-        # Sort by time (soonest first), then by stars
-        today_matches.sort(key=lambda m: (m.time if m.time else datetime.max, -m.stars))
         
         # Build message with grouping by star rating
         message = f"<b>🎮 All Matches Today ({today.strftime('%d.%m.%Y')}):</b>\n"
-        message += f"<i>Total: {len(today_matches)} matches</i>\n\n"
+        message += f"<i>Total: {len(all_matches)} matches</i>\n\n"
         
-        # Group by stars for better overview
+        # Group by stars
         by_stars = {}
-        for match in today_matches:
-            if match.stars not in by_stars:
-                by_stars[match.stars] = []
-            by_stars[match.stars].append(match)
+        for item in all_matches:
+            match = item['match']
+            stars = match.stars
+            if stars not in by_stars:
+                by_stars[stars] = {'finished': [], 'upcoming': []}
+            by_stars[stars][item['status']].append(match)
         
         # Show in descending star order
         for stars in sorted(by_stars.keys(), reverse=True):
-            star_matches = by_stars[stars]
-            stars_str = "⭐" * stars if stars > 0 else "◾"
-            message += f"<b>{stars_str} {len(star_matches)} match{'es' if len(star_matches) != 1 else ''}:</b>\n"
+            stars_str = "☆" * stars if stars > 0 else "No rating"
+            star_data = by_stars[stars]
+            total_count = len(star_data['finished']) + len(star_data['upcoming'])
             
-            for match in star_matches[:10]:  # Limit to first 10 per category
-                time_str = match.time.strftime('%H:%M') if match.time else 'TBA'
-                message += f"{time_str} | {match.team1} vs {match.team2}\n"
+            message += f"<b>{stars_str} ({total_count} match{'es' if total_count != 1 else ''}):</b>\n\n"
             
-            if len(star_matches) > 10:
-                message += f"<i>... and {len(star_matches) - 10} more</i>\n"
+            # Show finished matches first
+            for result in star_data['finished'][:8]:
+                message += f"{result.format_for_telegram()}\n\n"
+            
+            # Then show upcoming matches
+            for match in star_data['upcoming'][:8]:
+                message += f"{match.format_for_telegram()}\n\n"
+            
+            remaining = total_count - 16
+            if remaining > 0:
+                message += f"<i>... and {remaining} more</i>\n"
             message += "\n"
         
-        await update.message.reply_text(message, parse_mode='HTML')
+        await update.message.reply_text(message, parse_mode='HTML', disable_web_page_preview=True)
 
-    async def games_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler for /games Command - shows upcoming games for favorite teams"""
+    async def setminstar_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handler for /setminstar Command - set minimum star rating"""
+        user_id = update.effective_user.id
+        
+        # Check if argument provided
+        if not context.args or len(context.args) == 0:
+            current_min = db.get_min_stars(user_id)
+            await update.message.reply_text(
+                f"Your current minimum star rating: {current_min}\n\n"
+                f"Usage: /setminstar <number>\n"
+                f"Example: /setminstar 2\n\n"
+                f"Available ratings: 1-5 stars"
+            )
+            return
+        
+        # Parse the number
+        try:
+            min_stars = int(context.args[0])
+            if min_stars < 1 or min_stars > 5:
+                await update.message.reply_text(
+                    "Please use a number between 1 and 5.\n"
+                    "Example: /setminstar 2"
+                )
+                return
+            
+            db.set_min_stars(user_id, min_stars)
+            await update.message.reply_text(
+                f"✅ Minimum star rating set to {min_stars}!\n\n"
+                f"You will now see matches with {min_stars}+ stars in /today and daily reminders."
+            )
+            
+        except ValueError:
+            await update.message.reply_text(
+                "Please provide a valid number.\n"
+                "Example: /setminstar 2"
+            )
+
+    async def favgames_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handler for /favgames Command - shows upcoming games for favorite teams"""
         user_id = update.effective_user.id
         favorites = db.get_favorites(user_id)
         
@@ -300,14 +388,10 @@ class TelegramBot:
         # Build message
         message = "<b>🎮 Upcoming Games for Your Favorites:</b>\n\n"
         for team, match in team_games.items():
-            stars = "⭐" * match.stars if match.stars > 0 else ""
             message += f"<b>{team}</b>\n"
-            message += f"{match}\n"
-            if stars:
-                message += f"{stars}\n"
-            message += "\n"
+            message += f"{match.format_for_telegram()}\n\n"
         
-        await update.message.reply_text(message, parse_mode='HTML')
+        await update.message.reply_text(message, parse_mode='HTML', disable_web_page_preview=True)
 
     async def favorites_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler for /favorites Command"""
@@ -481,34 +565,42 @@ class TelegramBot:
         await query.answer()
 
     async def send_daily_summary(self):
-        """Send daily summary to all users with favorites"""
-        logger.info("Sending daily summary...")
+        """Send daily summary to all users (respecting their min_stars setting)"""
+        logger.info("Sending daily summary at 9:00 AM...")
         
-        matches = scraper.get_todays_matches(min_stars=MIN_STARS_FOR_IMPORTANT)
-        
-        if not matches:
-            logger.info("No matches found for summary")
-            return
-        
-        # Sort by stars
-        matches.sort(key=lambda m: m.stars, reverse=True)
-        
-        message = "<b>🌅 Good Morning! Today's Matches:</b>\n\n"
-        for match in matches:
-            stars = "⭐" * match.stars
-            message += f"{stars}\n{match}\n\n"
-        
-        # Sende an alle Benutzer mit Favoriten
+        # Send to all users who have set preferences or favorites
         users = db.get_all_users_with_favorites()
+        
         for user_id in users:
             try:
+                # Get user's min_stars setting
+                min_stars = db.get_min_stars(user_id)
+                
+                # Get today's matches with user's min_stars
+                matches = scraper.get_todays_matches(min_stars=min_stars)
+                today = datetime.now().date()
+                today_matches = [m for m in matches if m.time and m.time.date() == today]
+                
+                if not today_matches:
+                    continue
+                
+                # Sort by stars (highest first), then by time
+                today_matches.sort(key=lambda m: (-m.stars, m.time if m.time else datetime.max))
+                
+                message = f"<b>🌅 Good Morning! Today's Matches ({min_stars}+ stars):</b>\n\n"
+                for match in today_matches[:15]:  # Max 15 matches
+                    message += f"{match.format_for_telegram()}\n\n"
+                
                 await self.application.bot.send_message(
                     chat_id=user_id,
                     text=message,
-                    parse_mode='HTML'
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
                 )
+                logger.info(f"Sent daily summary to user {user_id}")
+                
             except Exception as e:
-                logger.error(f"Error sending to user {user_id}: {e}")
+                logger.error(f"Error sending daily summary to user {user_id}: {e}")
 
     async def check_match_results(self):
         """Check results of favorite team matches"""

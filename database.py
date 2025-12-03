@@ -24,6 +24,14 @@ class Database:
                 )
             ''')
             
+            # Table for user settings
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    user_id INTEGER PRIMARY KEY,
+                    min_stars INTEGER DEFAULT 1
+                )
+            ''')
+            
             # Table for already sent notifications
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS notifications_sent (
@@ -119,3 +127,31 @@ class Database:
         except Exception as e:
             logger.error(f"Error checking notification: {e}")
             return False
+
+    def set_min_stars(self, user_id: int, min_stars: int):
+        """Set minimum stars for a user"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'INSERT OR REPLACE INTO user_settings (user_id, min_stars) VALUES (?, ?)',
+                    (user_id, min_stars)
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error setting min_stars: {e}")
+
+    def get_min_stars(self, user_id: int) -> int:
+        """Get minimum stars for a user (default: 1)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT min_stars FROM user_settings WHERE user_id = ?',
+                    (user_id,)
+                )
+                result = cursor.fetchone()
+                return result[0] if result else 1  # Default to 1 star
+        except Exception as e:
+            logger.error(f"Error getting min_stars: {e}")
+            return 1

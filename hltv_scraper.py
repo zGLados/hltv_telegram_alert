@@ -38,6 +38,44 @@ class Match:
     @time.setter
     def time(self, value):
         self._time = value
+    
+    def get_match_url(self) -> str:
+        """Get the full HLTV match URL"""
+        if self._match_url:
+            return f"{HLTV_BASE_URL}{self._match_url}"
+        return f"{HLTV_BASE_URL}/matches/{self.match_id}"
+    
+    def format_for_telegram(self) -> str:
+        """Format match for Telegram with HTML markup and link"""
+        url = self.get_match_url()
+        
+        # Star rating using white star (☆)
+        stars_display = "☆" * self.stars if self.stars > 0 else "No rating"
+        
+        if self.score:
+            # Finished match
+            return (
+                f'<a href="{url}">{self.team1} vs {self.team2}</a>\n'
+                f'Result: {self.score}\n'
+                f'Rating: {stars_display}\n'
+                f'@ {self.event}'
+            )
+        elif self.time:
+            # Upcoming match with time
+            date_str = self.time.strftime("%d %b")
+            time_str = self.time.strftime("%H:%M UTC")
+            return (
+                f'<a href="{url}">{self.team1} vs {self.team2}</a>\n'
+                f'Rating: {stars_display}\n'
+                f'{date_str} {time_str} @ {self.event}'
+            )
+        else:
+            # No time available
+            return (
+                f'<a href="{url}">{self.team1} vs {self.team2}</a>\n'
+                f'Rating: {stars_display}\n'
+                f'@ {self.event}'
+            )
 
     def __str__(self):
         if self.score:
@@ -433,7 +471,7 @@ class HLTVScraper:
         return None
 
     def get_recent_results(self, hours: int = 24) -> List[Match]:
-        """Get recent results from the last X hours"""
+        """Get recent results (approximately last 24 hours, no exact date filtering available)"""
         try:
             self._rate_limit()
             response = self.session.get(HLTV_RESULTS_URL, timeout=10)
@@ -464,14 +502,18 @@ class HLTVScraper:
     def _parse_result_container(self, container) -> Optional[Match]:
         """Parse a result container"""
         try:
-            # Match ID
+            # Match ID and URL
             match_link = container.find('a', class_='a-reset')
             if not match_link:
                 return None
             
-            match_id = match_link.get('href', '').split('/')[-2]
+            match_url = match_link.get('href', '')
+            match_id = match_url.split('/')[-2] if match_url else None
             
-            # Teams
+            if not match_id:
+                return None
+            
+            # Teams - they're in divs with class 'team'
             team_divs = container.find_all('div', class_='team')
             if len(team_divs) < 2:
                 return None
@@ -479,20 +521,30 @@ class HLTVScraper:
             team1_name = team_divs[0].text.strip()
             team2_name = team_divs[1].text.strip()
             
-            # Score
-            result_score = container.find('div', class_='result-score')
-            score = result_score.text.strip() if result_score else "0-0"
+            # Score - in td with class 'result-score'
+            result_score_td = container.find('td', class_='result-score')
+            if result_score_td:
+                # Extract score from spans
+                score_spans = result_score_td.find_all('span')
+                if len(score_spans) >= 2:
+                    score1 = score_spans[0].text.strip()
+                    score2 = score_spans[1].text.strip()
+                    score = f"{score1}-{score2}"
+                else:
+                    score = result_score_td.text.strip().replace('\n', '').replace(' ', '')
+            else:
+                score = "0-0"
             
-            # Event
-            event_div = container.find('div', class_='event-name')
-            event = event_div.text.strip() if event_div else "Unknown Event"
+            # Event - in span with class 'event-name'
+            event_span = container.find('span', class_='event-name')
+            event = event_span.text.strip() if event_span else "Unknown Event"
             
-            # Stars
+            # Stars - count i tags with class 'fa-star'
             stars = 0
             star_divs = container.find_all('i', class_='fa-star')
-            stars = len([s for s in star_divs if 'fa-star' in s.get('class', [])])
+            stars = len(star_divs)
             
-            return Match(
+            match = Match(
                 match_id=match_id,
                 team1=team1_name,
                 team2=team2_name,
@@ -502,6 +554,12 @@ class HLTVScraper:
                 score=score,
                 status="finished"
             )
+            
+            # Store match URL for link generation
+            match._match_url = match_url
+            match._scraper = self
+            
+            return match
             
         except Exception as e:
             logger.error(f"Error parsing result container: {e}")
