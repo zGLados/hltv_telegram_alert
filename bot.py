@@ -103,6 +103,23 @@ class TelegramBot:
             run_date=datetime.now() + timedelta(seconds=10),
             id='initial_cache_warmup'
         )
+        
+        # Load team list immediately on startup
+        self.scheduler.add_job(
+            self.load_teams,
+            'date',
+            run_date=datetime.now() + timedelta(seconds=1),
+            id='initial_team_load'
+        )
+        
+        # Refresh team list daily
+        self.scheduler.add_job(
+            self.load_teams,
+            'cron',
+            hour=3,
+            minute=0,
+            id='daily_team_refresh'
+        )
     
     async def setup_bot_commands(self):
         """Set bot commands via Telegram API"""
@@ -425,8 +442,11 @@ class TelegramBot:
             if not scraper.search_team(team_name):
                 await update.message.reply_text(
                     f"❌ Team '{team_name}' not found on HLTV.\n\n"
-                    "Please check the spelling or try a different name.\n"
-                    "Examples: FaZe, Navi, G2, Vitality, BIG, Mouz"
+                    "Possible reasons:\n"
+                    "• Team doesn't exist or is spelled incorrectly\n"
+                    "• HLTV is currently unavailable\n\n"
+                    "Please check the spelling or try again later.\n"
+                    "Examples: FaZe, Navi, G2, Vitality, BIG, MOUZ"
                 )
                 return ConversationHandler.END
             
@@ -653,15 +673,33 @@ class TelegramBot:
                 logger.info("Datetime preloading completed")
         except Exception as e:
             logger.error(f"Error refreshing match cache: {e}")
+    
+    async def load_teams(self):
+        """Load/refresh the team list from HLTV"""
+        try:
+            logger.info("Loading team list from HLTV...")
+            teams = scraper.get_all_teams(use_cache=False)
+            logger.info(f"Loaded {len(teams)} teams from HLTV")
+        except Exception as e:
+            logger.error(f"Error loading team list: {e}")
 
     def run(self):
         """Start the bot"""
         logger.info("Starting bot...")
         self.scheduler.start()
         
-        # Set bot commands on startup
+        # Load teams and cache immediately on startup (synchronously before starting polling)
         import asyncio
-        asyncio.get_event_loop().run_until_complete(self.setup_bot_commands())
+        loop = asyncio.get_event_loop()
+        
+        # Set bot commands
+        loop.run_until_complete(self.setup_bot_commands())
+        
+        # Load teams immediately
+        loop.run_until_complete(self.load_teams())
+        
+        # Refresh match cache
+        loop.run_until_complete(self.refresh_match_cache())
         
         self.application.run_polling(allowed_updates=Update.ALL_TYPES)
 
