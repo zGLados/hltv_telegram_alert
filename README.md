@@ -2,6 +2,14 @@
 
 A Telegram bot that keeps you informed about the most important CS:GO/CS2 matches on HLTV.org and sends notifications about your favorite teams.
 
+## 🤖 Public Bot Instance
+
+**You can use the bot right now without any installation!**
+
+Simply start a chat with [@hltv_alert_bot](https://t.me/hltv_alert_bot) on Telegram and send `/start` to begin.
+
+**Or host your own instance using the instructions below.**
+
 ## Features
 
 ✅ **Daily Match Overview** - Get a morning summary at 9:00 AM with matches based on your star rating preference  
@@ -133,12 +141,12 @@ The bot is now running and accessible via Telegram!
 |---------|-------------|
 | `/start` | Welcome message and overview |
 | `/help` | Help and instructions |
-| `/today` | Shows today's important matches (based on your star rating) |
-| `/favgames` | Shows next match for each favorite team |
-| `/setminstar <number>` | Set minimum star rating (1-5) |
-| `/favorites` | Shows your favorite teams |
 | `/add` | Add a favorite team |
 | `/remove` | Remove a favorite team |
+| `/favorites` | Shows your favorite teams |
+| `/setminstar <number>` | Set minimum star rating (1-5) |
+| `/today` | Shows today's important matches (based on your star rating) |
+| `/favgames` | Shows next match for each favorite team |
 
 ### Example Workflow
 

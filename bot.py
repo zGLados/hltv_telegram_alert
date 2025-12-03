@@ -110,13 +110,13 @@ class TelegramBot:
         
         commands = [
             BotCommand("start", "Welcome message and overview"),
-            BotCommand("today", "Show today's important matches"),
-            BotCommand("favgames", "Show upcoming games for your favorite teams"),
-            BotCommand("setminstar", "Set minimum star rating 1-5 (e.g., /setminstar 2)"),
-            BotCommand("favorites", "Show your favorite teams"),
+            BotCommand("help", "Show help and instructions"),
             BotCommand("add", "Add a favorite team"),
             BotCommand("remove", "Remove a favorite team"),
-            BotCommand("help", "Show help and instructions"),
+            BotCommand("favorites", "Show your favorite teams"),
+            BotCommand("setminstar", "Set minimum star rating 1-5 (e.g., /setminstar 2)"),
+            BotCommand("today", "Show today's important matches"),
+            BotCommand("favgames", "Show upcoming games for your favorite teams"),
         ]
         
         # Set commands for all private chats (direct messages)
@@ -156,13 +156,13 @@ class TelegramBot:
         help_text = (
             "<b>🎮 HLTV CS:GO Match Bot - Help</b>\n\n"
             "<b>Commands:</b>\n\n"
-            "/today - Shows today's important matches (based on your star rating)\n\n"
-            "/favgames - Shows upcoming games for your favorite teams\n\n"
-            "/setminstar &lt;number&gt; - Set minimum star rating (1-5)\n"
-            "  Example: /setminstar 2\n\n"
-            "/favorites - Shows your list of favorite teams\n\n"
             "/add - Add a new favorite team\n\n"
             "/remove - Remove a team from your favorites\n\n"
+            "/favorites - Shows your list of favorite teams\n\n"
+            "/setminstar &lt;number&gt; - Set minimum star rating (1-5)\n"
+            "  Example: /setminstar 2\n\n"
+            "/today - Shows today's important matches (based on your star rating)\n\n"
+            "/favgames - Shows upcoming games for your favorite teams\n\n"
             "<b>Automatic Notifications:</b>\n"
             "• Daily summary at 09:00 (respects your star rating setting)\n"
             "• Notifications about your favorite teams' games\n\n"
