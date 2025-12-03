@@ -4,11 +4,12 @@ A Telegram bot that keeps you informed about the most important CS:GO/CS2 matche
 
 ## Features
 
-✅ **Daily Match Overview** - Get a morning summary of the most important matches of the day  
-✅ **Manage Favorite Teams** - Add your favorite teams and receive notifications  
-✅ **Live Results** - Automatic updates when your favorite teams' matches end  
-✅ **Star Filter** - Only important matches (based on HLTV star rating)  
-✅ **Easy to Use** - Intuitive commands for management
+✅ **Daily Match Overview** - Get a morning summary at 9:00 AM with matches based on your star rating preference  
+✅ **Customizable Star Rating** - Set your preferred minimum star rating (1-3 stars) to filter matches  
+✅ **Manage Favorite Teams** - Add your favorite teams and see their upcoming games  
+✅ **Auto-updating Commands** - Bot commands are automatically registered via Telegram API  
+✅ **Smart Caching** - 30-minute cache system for improved performance  
+✅ **Clean Format** - Matches displayed with clickable links to HLTV match pages
 
 ## Installation
 
@@ -130,9 +131,9 @@ The bot is now running and accessible via Telegram!
 |---------|-------------|
 | `/start` | Welcome message and overview |
 | `/help` | Help and instructions |
-| `/today` | Shows today's most important matches |
-| `/alltoday` | Shows ALL matches for today (no star filter) |
-| `/games` | Shows next match for each favorite team |
+| `/today` | Shows today's important matches (based on your star rating) |
+| `/favgames` | Shows next match for each favorite team |
+| `/setminstar <number>` | Set minimum star rating (1-5) |
 | `/favorites` | Shows your favorite teams |
 | `/add` | Add a favorite team |
 | `/remove` | Remove a favorite team |
@@ -140,7 +141,11 @@ The bot is now running and accessible via Telegram!
 ### Example Workflow
 
 1. Start the bot with `/start`
-2. Add your favorite teams:
+2. Set your preferred star rating (optional, default is 1):
+   ```
+   /setminstar 2
+   ```
+3. Add your favorite teams:
    ```
    /add FaZe
    ```
@@ -152,27 +157,39 @@ The bot is now running and accessible via Telegram!
    Vitality
    done
    ```
-3. Check today's matches:
+4. Check today's matches:
    ```
    /today
    ```
-4. The bot automatically sends:
-   - Daily summary at 09:00 AM
-   - Notifications about your favorites' matches
-   - Results after matches end
+5. Check your favorite teams' upcoming games:
+   ```
+   /favgames
+   ```
+6. The bot automatically sends:
+   - Daily summary at 09:00 AM (respecting your star rating setting)
+   - Shows matches with clickable links to HLTV
 
 ## Configuration
 
 In `config.py` you can adjust the following settings:
 
-- `MIN_STARS_FOR_IMPORTANT`: Minimum number of stars for "important" matches (default: 1)
 - `DAILY_SUMMARY_TIME`: Time for daily summary (default: 09:00)
 - `TIMEZONE`: Timezone for notifications (default: Europe/Berlin)
+
+### User Settings (per user)
+
+Each user can customize:
+- **Minimum Star Rating**: Set via `/setminstar` command (default: 1)
+  - 1 star: Important matches
+  - 2 stars: Very important matches
+  - 3 stars: High-profile matches
+  - 4 stars: Top-tier matches
+  - 5 stars: Elite/Major matches
 
 ## Automatic Notifications
 
 The bot checks:
-- **Daily at 09:00 AM**: Sends a summary of all important matches
+- **Daily at 09:00 AM**: Sends a summary of important matches (respecting your star rating)
 - **Every 30 minutes**: Checks if your favorite teams' matches have ended and refreshes match cache
 
 ### Smart Caching System
