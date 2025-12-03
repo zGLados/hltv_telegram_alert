@@ -106,7 +106,7 @@ class TelegramBot:
     
     async def setup_bot_commands(self):
         """Set bot commands via Telegram API"""
-        from telegram import BotCommand
+        from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats
         
         commands = [
             BotCommand("start", "Welcome message and overview"),
@@ -119,8 +119,19 @@ class TelegramBot:
             BotCommand("help", "Show help and instructions"),
         ]
         
-        await self.application.bot.set_my_commands(commands)
-        logger.info("Bot commands updated successfully")
+        # Set commands for all private chats (direct messages)
+        await self.application.bot.set_my_commands(
+            commands=commands,
+            scope=BotCommandScopeAllPrivateChats()
+        )
+        
+        # Also set default scope as fallback
+        await self.application.bot.set_my_commands(
+            commands=commands,
+            scope=BotCommandScopeDefault()
+        )
+        
+        logger.info("Bot commands updated successfully for all scopes")
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler for /start Command"""
