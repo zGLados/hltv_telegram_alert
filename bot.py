@@ -158,7 +158,7 @@ class TelegramBot:
             "<b>Commands:</b>\n\n"
             "/today - Shows today's important matches (based on your star rating)\n\n"
             "/favgames - Shows upcoming games for your favorite teams\n\n"
-            "/setminstar <number> - Set minimum star rating (1-5)\n"
+            "/setminstar &lt;number&gt; - Set minimum star rating (1-5)\n"
             "  Example: /setminstar 2\n\n"
             "/favorites - Shows your list of favorite teams\n\n"
             "/add - Add a new favorite team\n\n"
