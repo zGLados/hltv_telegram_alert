@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
@@ -54,7 +54,7 @@ class TelegramBot:
             },
             fallbacks=[CommandHandler("cancel", self.cancel)]
         )
-        self.application.add_handler(add_fav_handler)
+        self.application.add_handler(add_conv_handler)
         
         # Conversation Handler for removing favorites
         remove_conv_handler = ConversationHandler(
@@ -64,7 +64,7 @@ class TelegramBot:
             },
             fallbacks=[CommandHandler("cancel", self.cancel)]
         )
-        self.application.add_handler(remove_fav_handler)
+        self.application.add_handler(remove_conv_handler)
         
         # Callback Query Handler
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
@@ -85,6 +85,22 @@ class TelegramBot:
             'interval',
             minutes=30,
             id='check_results'
+        )
+        
+        # Refresh match cache every 30 minutes to ensure fresh data
+        self.scheduler.add_job(
+            self.refresh_match_cache,
+            'interval',
+            minutes=30,
+            id='refresh_cache'
+        )
+        
+        # Initial cache warmup
+        self.scheduler.add_job(
+            self.refresh_match_cache,
+            'date',
+            run_date=datetime.now() + timedelta(seconds=10),
+            id='initial_cache_warmup'
         )
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -125,21 +141,32 @@ class TelegramBot:
 
     async def today_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler for /today Command"""
-        await update.message.reply_text("🔍 Searching for today's matches...")
+        await update.message.reply_text("🔍 Searching for today's important matches...")
         
         matches = scraper.get_todays_matches(min_stars=MIN_STARS_FOR_IMPORTANT)
         
         if not matches:
             await update.message.reply_text(
-                "No important matches found for today. 😔"
+                "No important matches found. 😔"
             )
             return
         
-        # Sort by stars (most important first)
-        matches.sort(key=lambda m: m.stars, reverse=True)
+        # Filter to only show matches happening today
+        today = datetime.now().date()
+        today_matches = [m for m in matches if m.time and m.time.date() == today]
         
-        message = "<b>⭐ Important Matches Today:</b>\n\n"
-        for match in matches:
+        if not today_matches:
+            await update.message.reply_text(
+                f"No important matches found for today ({today.strftime('%d.%m.%Y')}). 😔\n"
+                f"There are {len(matches)} upcoming matches, but they are on other days."
+            )
+            return
+        
+        # Sort by time (soonest first), then by stars (most important first)
+        today_matches.sort(key=lambda m: (m.time if m.time else datetime.max, -m.stars))
+        
+        message = f"<b>⭐ Important Matches Today ({today.strftime('%d.%m.%Y')}):</b>\n\n"
+        for match in today_matches:
             stars = "⭐" * match.stars
             message += f"{stars}\n{match}\n\n"
         
@@ -159,7 +186,7 @@ class TelegramBot:
         
         await update.message.reply_text("🔍 Searching for upcoming games...")
         
-        # Get all upcoming matches
+        # Get all upcoming matches (HLTV shows only future matches)
         matches = scraper.get_todays_matches(min_stars=0)
         
         if not matches:
@@ -179,7 +206,7 @@ class TelegramBot:
         
         if not team_games:
             await update.message.reply_text(
-                "No upcoming games found for your favorite teams today. 😔\n\n"
+                "No upcoming games found for your favorite teams. 😔\n\n"
                 "Your favorites: " + ", ".join(favorites)
             )
             return
@@ -431,6 +458,23 @@ class TelegramBot:
                                 db.mark_notification_sent(user_id, result.match_id, 'result')
                             except Exception as e:
                                 logger.error(f"Error sending to user {user_id}: {e}")
+    
+    async def refresh_match_cache(self):
+        """Refresh the match cache and preload datetimes for important matches"""
+        try:
+            logger.info("Refreshing match cache...")
+            # Force refresh by using use_cache=False
+            matches = scraper.get_todays_matches(min_stars=0, use_cache=False)
+            logger.info(f"Cache refreshed with {len(matches)} matches")
+            
+            # Preload datetimes for important matches (1+ stars) to ensure they're cached
+            important_matches = [m for m in matches if m.stars >= 1]
+            if important_matches:
+                logger.info(f"Preloading datetimes for {len(important_matches)} important matches...")
+                scraper.preload_match_datetimes(important_matches, max_matches=20)
+                logger.info("Datetime preloading completed")
+        except Exception as e:
+            logger.error(f"Error refreshing match cache: {e}")
 
     def run(self):
         """Start the bot"""
