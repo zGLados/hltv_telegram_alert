@@ -46,7 +46,7 @@ A Telegram bot that keeps you informed about the most important CS:GO/CS2 matche
 
 4. **Start Bot**
    ```bash
-   ./docker-start.sh
+   ./docker.sh start
    ```
    
    Or manually:
@@ -56,12 +56,14 @@ A Telegram bot that keeps you informed about the most important CS:GO/CS2 matche
 
 5. **View Logs**
    ```bash
-   docker compose logs -f
+   ./docker.sh logs
+   # or with follow mode:
+   ./docker.sh logs -f
    ```
 
 6. **Stop Bot**
    ```bash
-   docker compose down
+   ./docker.sh stop
    ```
 
 For detailed Docker instructions and troubleshooting, see [DOCKER.md](DOCKER.md)
@@ -245,9 +247,36 @@ The bot uses an intelligent caching system to ensure fast responses and accurate
 
 ### Docker (Production Environment)
 
-The bot is already running as a Docker container if you used `./start.sh` or `docker compose up -d`.
+The bot is already running as a Docker container if you used `./docker.sh start` or `docker compose up -d`.
 
-**Useful Commands:**
+**Docker Management Script:**
+
+The `docker.sh` script provides easy container management:
+
+```bash
+# Start bot (pulls latest git changes, builds, and starts)
+./docker.sh start
+
+# Stop bot
+./docker.sh stop
+
+# Restart bot (quick restart without rebuild)
+./docker.sh restart
+
+# Rebuild bot (pulls git changes, full rebuild)
+./docker.sh rebuild
+
+# View logs
+./docker.sh logs
+
+# View logs with follow mode
+./docker.sh logs -f
+
+# Check status
+./docker.sh status
+```
+
+**Manual Docker Commands:**
 
 ```bash
 # Check status
@@ -315,6 +344,10 @@ For a production server, it's recommended to:
 
 3. **Deploy updates:**
    ```bash
+   # Using docker.sh (automatically pulls git changes)
+   ./docker.sh rebuild
+   
+   # Or manually
    git pull
    docker compose down
    docker compose up --build -d

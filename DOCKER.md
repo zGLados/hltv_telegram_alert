@@ -1,151 +1,173 @@
-# Docker Setup für HLTV Telegram Bot
+# Docker Setup for HLTV Telegram Bot
 
-## Voraussetzungen
+## Prerequisites
 
-### Docker Desktop WSL2 Integration aktivieren
+### Enable Docker Desktop WSL2 Integration
 
-1. **Öffne Docker Desktop**
-2. Gehe zu **Settings** (⚙️) → **Resources** → **WSL Integration**
-3. Aktiviere **"Enable integration with my default WSL distro"**
-4. Aktiviere auch deine spezifische WSL2 Distribution (z.B. Ubuntu)
-5. Klicke **"Apply & Restart"**
-6. Warte bis Docker Desktop neu gestartet ist
+1. **Open Docker Desktop**
+2. Go to **Settings** (⚙️) → **Resources** → **WSL Integration**
+3. Enable **"Enable integration with my default WSL distro"**
+4. Also enable your specific WSL2 distribution (e.g., Ubuntu)
+5. Click **"Apply & Restart"**
+6. Wait until Docker Desktop has restarted
 
-### Alternative: Docker ohne WSL Integration
+### Alternative: Docker without WSL Integration
 
-Falls du Docker Desktop nicht in WSL integrieren möchtest, kannst du Docker-Befehle direkt aus Windows PowerShell ausführen.
+If you don't want to integrate Docker Desktop with WSL, you can run Docker commands directly from Windows PowerShell.
 
 ## Setup
 
-1. **Environment-Variablen konfigurieren:**
+1. **Configure environment variables:**
    ```bash
    cp .env.example .env
-   nano .env  # Füge deinen Bot Token ein
+   nano .env  # Add your bot token
    ```
 
-2. **Prüfe ob alles bereit ist:**
+2. **Make docker.sh executable:**
    ```bash
-   ./docker-check.sh
+   chmod +x docker.sh
    ```
 
-## Verwendung
+## Usage
 
-### Bot starten
+### Using docker.sh (Recommended)
+
+The `docker.sh` script provides convenient management commands:
 
 ```bash
-# Mit Docker Compose (empfohlen)
+# Start bot (automatically pulls latest git changes and builds)
+./docker.sh start
+
+# Stop bot
+./docker.sh stop
+
+# Restart bot (quick restart without rebuild)
+./docker.sh restart
+
+# Rebuild bot (pulls git changes and does full rebuild)
+./docker.sh rebuild
+
+# View logs
+./docker.sh logs
+
+# View logs with live updates
+./docker.sh logs -f
+
+# Check container status
+./docker.sh status
+```
+
+### Manual Docker Compose Commands
+
+If you prefer to use Docker Compose directly:
+
+```bash
+# Start bot
 docker compose up -d
 
-# Oder mit Build
+# Start with build
 docker compose up --build -d
-```
 
-### Logs ansehen
-
-```bash
-# Alle Logs
+# View logs
 docker compose logs -f
 
-# Nur neueste Logs
+# View latest logs only
 docker compose logs --tail=50 -f
-```
 
-### Bot Status prüfen
-
-```bash
+# Check bot status
 docker compose ps
-```
 
-### Bot stoppen
-
-```bash
-# Stoppen
+# Stop bot
 docker compose stop
 
-# Stoppen und Container entfernen
+# Stop and remove containers
 docker compose down
 
-# Stoppen, Container und Images entfernen
+# Stop, remove containers and images
 docker compose down --rmi all
-```
 
-### Bot neu starten
-
-```bash
+# Restart bot
 docker compose restart
-```
 
-### In den Container einsteigen
-
-```bash
+# Enter container shell
 docker compose exec hltv-bot bash
 ```
 
-## Datenbank
+## Database
 
-Die Datenbank wird im `./data/` Verzeichnis gespeichert und bleibt auch nach dem Löschen des Containers erhalten.
+The database is stored in the `./data/` directory and persists even after deleting the container.
 
 ## Logs
 
-Container-Logs werden automatisch rotiert:
-- Max. Größe pro Datei: 10 MB
-- Max. Anzahl Dateien: 3
+Container logs are automatically rotated:
+- Max. size per file: 10 MB
+- Max. number of files: 3
 
 ## Troubleshooting
 
-### Docker nicht gefunden in WSL2
+### Docker not found in WSL2
 
 ```bash
-# Prüfe ob Docker Desktop läuft
+# Check if Docker Desktop is running
 /mnt/c/Program\ Files/Docker/Docker/Docker\ Desktop.exe &
 
-# Oder nutze PowerShell direkt:
-# Öffne PowerShell in diesem Verzeichnis und führe aus:
+# Or use PowerShell directly:
+# Open PowerShell in this directory and run:
 docker compose up -d
 ```
 
-### Container startet nicht
+### Container won't start
 
 ```bash
-# Logs prüfen
+# Check logs
+./docker.sh logs
+# or
 docker compose logs
 
-# Container neu bauen
+# Rebuild container
+./docker.sh rebuild
+# or manually
 docker compose down
 docker compose build --no-cache
 docker compose up -d
 ```
 
-### Datenbank-Fehler
+### Database errors
 
 ```bash
-# Datenbank-Rechte prüfen
+# Check database permissions
 ls -la data/
 
-# Falls nötig, Rechte anpassen
+# Fix permissions if needed
 chmod 755 data/
 chmod 644 data/bot_data.db
 ```
 
 ## Updates
 
-Wenn du den Code aktualisiert hast:
+When you have code updates:
 
 ```bash
-# Bot stoppen
-docker compose down
+# Using docker.sh (automatically pulls latest git changes)
+./docker.sh rebuild
 
-# Neu bauen und starten
+# Or manually
+git pull
+docker compose down
 docker compose up --build -d
 
-# Logs prüfen
-docker compose logs -f
+# Check logs
+./docker.sh logs -f
 ```
 
-## Ressourcen-Limits
+## Resource Limits
 
-Der Container hat standardmäßig:
+The container has the following default limits:
 - **CPU**: Max 0.5 Cores, Min 0.1 Cores
 - **RAM**: Max 512 MB, Min 128 MB
 
-Diese können in `docker-compose.yml` angepasst werden.
+These can be adjusted in `docker-compose.yml`.
+
+## Auto-Update Feature
+
+The `docker.sh start` and `docker.sh rebuild` commands automatically pull the latest changes from git before building, ensuring you're always running the most recent version.
