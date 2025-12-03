@@ -116,7 +116,22 @@ restart_bot() {
     echo -e "${BLUE}🔄 Restarting bot...${NC}"
     echo ""
     
-    $DOCKER_COMPOSE restart
+    # Check if --pull flag is provided
+    if [ "$1" = "--pull" ]; then
+        echo -e "${CYAN}📥 Pulling latest changes from Git...${NC}"
+        git pull
+        if [ $? -ne 0 ]; then
+            echo ""
+            echo -e "${RED}❌ Git pull failed${NC}"
+            exit 1
+        fi
+        echo ""
+        echo -e "${CYAN}🔨 Rebuilding container with latest changes...${NC}"
+        echo ""
+        $DOCKER_COMPOSE up -d --build
+    else
+        $DOCKER_COMPOSE restart
+    fi
     
     if [ $? -eq 0 ]; then
         echo ""
@@ -202,6 +217,7 @@ show_help() {
     echo "  start --pull     Pull latest changes from git, then start"
     echo "  stop             Stop the bot"
     echo "  restart          Restart the bot"
+    echo "  restart --pull   Pull latest changes, rebuild and restart"
     echo "  rebuild          Rebuild and restart the bot"
     echo "  status           Show container status"
     echo "  logs             Show last 50 log lines"
@@ -212,6 +228,7 @@ show_help() {
     echo "Examples:"
     echo "  ./docker.sh start"
     echo "  ./docker.sh start --pull"
+    echo "  ./docker.sh restart --pull"
     echo "  ./docker.sh logs -f"
     echo "  ./docker.sh rebuild"
     echo ""
@@ -226,7 +243,7 @@ case "$1" in
         stop_bot
         ;;
     restart)
-        restart_bot
+        restart_bot "$2"
         ;;
     rebuild)
         rebuild_bot
