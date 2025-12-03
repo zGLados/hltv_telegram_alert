@@ -154,8 +154,8 @@ class TelegramBot:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler for /start Command"""
         welcome_text = (
-            "🎮 <b>Welcome to the HLTV CS:GO Match Bot!</b>\n\n"
-            "I keep you informed about the most important CS:GO matches of the day "
+            "🎮 <b>Welcome to the HLTV CS2 Match Bot!</b>\n\n"
+            "I keep you informed about the most important CS2 matches of the day "
             "<b>Available Commands:</b>\n"
             "/today - Show today's important matches\n"
             "/favgames - Show upcoming games for your favorite teams\n"
@@ -172,7 +172,7 @@ class TelegramBot:
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler for /help Command"""
         help_text = (
-            "<b>🎮 HLTV CS:GO Match Bot - Help</b>\n\n"
+            "<b>🎮 HLTV CS2 Match Bot - Help</b>\n\n"
             "<b>Commands:</b>\n\n"
             "/add - Add a new favorite team\n\n"
             "/remove - Remove a team from your favorites\n\n"
