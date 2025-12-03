@@ -4,3 +4,5 @@ beautifulsoup4==4.12.2
 lxml==4.9.3
 apscheduler==3.10.4
 python-dotenv==1.0.0
+cloudscraper==1.2.71
+brotli==1.1.0

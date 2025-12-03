@@ -45,11 +45,19 @@ class HLTVScraper:
     """Scraper for HLTV.org"""
     
     def __init__(self):
-        self.session = cloudscraper.create_scraper()
+        # Create scraper with enhanced browser properties
+        self.session = cloudscraper.create_scraper(
+            browser={
+                'browser': 'chrome',
+                'platform': 'windows',
+                'desktop': True
+            },
+            delay=10  # Initial delay for Cloudflare challenge
+        )
         self.session.headers.update(HEADERS)
         self._team_cache = set()  # Cache for found teams
         self._last_request_time = 0
-        self._request_delay = 2  # Seconds between requests
+        self._request_delay = 3  # Increase delay to 3 seconds
 
     def _rate_limit(self):
         """Rate limiting to avoid overloading HLTV"""
@@ -63,18 +71,18 @@ class HLTVScraper:
         """Check if a team exists on HLTV"""
         try:
             self._rate_limit()
-            # Suche auf der Teams-Seite
+            # Search on the teams page
             search_url = f"{HLTV_BASE_URL}/search?term={team_name}"
             response = self.session.get(search_url, timeout=10)
             response.raise_for_status()
             
             soup = BeautifulSoup(response.text, 'lxml')
             
-            # Suche nach Team-Ergebnissen
+            # Search for team results
             team_results = soup.find_all('a', href=re.compile(r'/team/\d+/'))
             
             if team_results:
-                # Speichere gefundene Teams im Cache
+                # Store found teams in cache
                 for result in team_results:
                     team_text = result.get_text(strip=True)
                     if team_text:
@@ -97,17 +105,17 @@ class HLTVScraper:
             return True
 
     def get_todays_matches(self, min_stars: int = 0) -> List[Match]:
-        """Hole die heutigen Matches von HLTV"""
+        """Get today's matches from HLTV"""
         try:
             self._rate_limit()
-            response = self.session.get(HLTV_MATCHES_URL, timeout=10)
+            response = self.session.get(HLTV_MATCHES_URL, timeout=15)
             response.raise_for_status()
             
             soup = BeautifulSoup(response.text, 'lxml')
             matches = []
             
-            # Find all match containers for today
-            match_containers = soup.find_all('div', class_='upcomingMatch')
+            # Find all match containers (new structure)
+            match_containers = soup.find_all('div', class_='match')
             
             for container in match_containers:
                 try:
@@ -126,44 +134,76 @@ class HLTVScraper:
             return []
 
     def _parse_match_container(self, container) -> Optional[Match]:
-        """Parse einen Match-Container"""
+        """Parse a match container (new HLTV structure)"""
         try:
-            # Match ID
-            match_link = container.find('a', class_='match')
+            # Match ID and event name from URL
+            match_link = container.find('a', href=re.compile(r'/matches/\d+/'))
             if not match_link:
                 return None
             
-            match_id = match_link.get('href', '').split('/')[-2]
+            match_url = match_link.get('href', '')
+            match_parts = match_url.split('/')
+            if len(match_parts) < 3:
+                return None
+            
+            match_id = match_parts[2]
             
             # Teams
-            team_divs = container.find_all('div', class_='matchTeam')
+            team_divs = container.find_all('div', class_='match-team')
             if len(team_divs) < 2:
                 return None
             
-            team1 = team_divs[0].find('div', class_='matchTeamName')
-            team2 = team_divs[1].find('div', class_='matchTeamName')
+            team1_elem = team_divs[0].find('div', class_='match-teamname')
+            team2_elem = team_divs[1].find('div', class_='match-teamname')
             
-            if not team1 or not team2:
+            if not team1_elem or not team2_elem:
                 return None
             
-            team1_name = team1.text.strip()
-            team2_name = team2.text.strip()
+            team1_name = team1_elem.get_text(strip=True)
+            team2_name = team2_elem.get_text(strip=True)
             
-            # Event
-            event_div = container.find('div', class_='matchEventName')
-            event = event_div.text.strip() if event_div else "Unknown Event"
+            if not team1_name or not team2_name:
+                return None
             
-            # Zeit
-            time_div = container.find('div', class_='matchTime')
+            # Extract event name from URL and remove team names
+            # URL format: /matches/ID/team1-vs-team2-event-name
+            event = "Unknown Event"
+            if len(match_parts) > 3:
+                url_slug = match_parts[3]
+                # Remove team names from the slug (they appear at the beginning)
+                # Convert team names to lowercase and replace spaces with hyphens
+                team1_slug = team1_name.lower().replace(' ', '-').replace('.', '')
+                team2_slug = team2_name.lower().replace(' ', '-').replace('.', '')
+                
+                # Remove "team1-vs-team2-" pattern from the beginning
+                event_slug = url_slug
+                for pattern in [f"{team1_slug}-vs-{team2_slug}-", f"{team2_slug}-vs-{team1_slug}-"]:
+                    if event_slug.startswith(pattern):
+                        event_slug = event_slug[len(pattern):]
+                        break
+                
+                # Clean up and format the event name
+                event = event_slug.replace('-', ' ').title()
+            
+            # Time
+            time_div = container.find('div', class_='match-time')
             match_time = None
             if time_div:
-                time_str = time_div.text.strip()
+                time_str = time_div.get_text(strip=True)
                 match_time = self._parse_time(time_str)
             
-            # Sterne (Wichtigkeit)
+            # Stars (importance) - count only non-faded stars
             stars = 0
-            star_divs = container.find_all('i', class_='fa-star')
-            stars = len([s for s in star_divs if 'fa-star' in s.get('class', [])])
+            star_container = container.find('div', class_='match-rating')
+            if star_container:
+                star_icons = star_container.find_all('i', class_='fa-star')
+                # Count only stars without 'faded' class
+                stars = len([s for s in star_icons if 'faded' not in s.get('class', [])])
+            
+            # Check status (live match?)
+            status = "upcoming"
+            if star_container and 'matchLive' in star_container.get('class', []):
+                status = "live"
             
             return Match(
                 match_id=match_id,
@@ -171,7 +211,8 @@ class HLTVScraper:
                 team2=team2_name,
                 event=event,
                 time=match_time,
-                stars=stars
+                stars=stars,
+                status=status
             )
             
         except Exception as e:
@@ -179,7 +220,7 @@ class HLTVScraper:
             return None
 
     def _parse_time(self, time_str: str) -> Optional[datetime]:
-        """Parse Zeit-String von HLTV"""
+        """Parse time string from HLTV"""
         try:
             # Format: "19:00"
             if ':' in time_str:
@@ -201,10 +242,10 @@ class HLTVScraper:
             soup = BeautifulSoup(response.text, 'lxml')
             results = []
             
-            # Finde alle Result-Container
+            # Find all result containers
             result_containers = soup.find_all('div', class_='result-con')
             
-            for container in result_containers[:20]:  # Limitiere auf die neuesten 20
+            for container in result_containers[:20]:  # Limit to newest 20
                 try:
                     result = self._parse_result_container(container)
                     if result:
@@ -221,7 +262,7 @@ class HLTVScraper:
             return []
 
     def _parse_result_container(self, container) -> Optional[Match]:
-        """Parse einen Result-Container"""
+        """Parse a result container"""
         try:
             # Match ID
             match_link = container.find('a', class_='a-reset')
@@ -246,7 +287,7 @@ class HLTVScraper:
             event_div = container.find('div', class_='event-name')
             event = event_div.text.strip() if event_div else "Unknown Event"
             
-            # Sterne
+            # Stars
             stars = 0
             star_divs = container.find_all('i', class_='fa-star')
             stars = len([s for s in star_divs if 'fa-star' in s.get('class', [])])
