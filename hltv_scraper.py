@@ -10,6 +10,25 @@ from config import HLTV_BASE_URL, HLTV_MATCHES_URL, HLTV_RESULTS_URL, HEADERS
 
 logger = logging.getLogger(__name__)
 
+# Fallback list of top teams (updated regularly)
+# This list is used when HLTV is unavailable due to Cloudflare blocking
+TOP_TEAMS_FALLBACK = {
+    # Top 30 teams as of December 2025
+    'spirit', 'faze', 'navi', 'vitality', 'g2', 'mouz', 'liquid',
+    'heroic', 'eternal fire', 'complexity', 'virtus.pro', 'big', 
+    'cloud9', 'pain', 'imperial', 'furia', 'flyquest', 'saw',
+    'mibr', 'monte', 'gamerlegion', '3dmax', 'ence', 'b8', 
+    'lynn vision', 'rare atom', 'betboom', 'nemiga', 'passion ua',
+    'kr', 'oddik', 'tyloo', 'ecstatic', 'falcons', 'aurora',
+    # Additional common teams
+    'astralis', 'nip', 'fnatic', 'vp', 'og', 'outsiders',
+    'apeks', 'party astronauts', 'nouns', 'legacy', 'grayhound',
+    '9z', 'fluxo', 'red canids', 'sharks', 'los kogutos',
+    'amkal', 'forze', 'sinners', 'sprout', 'preasy', 'endpoint',
+    'alternate attax', 'koi', '9 pandas', 'zero tenacity',
+    'ihc', 'mongolz', 'atox', 'talon', 'grayhound gaming',
+}
+
 
 class Match:
     """Represents an HLTV Match"""
@@ -115,6 +134,9 @@ class HLTVScraper:
         self._matches_cache = None  # Cache for all matches
         self._matches_cache_time = None  # Timestamp of last cache update
         self._cache_duration = 1800  # Cache duration in seconds (30 minutes)
+        self._all_teams = None  # Cache for all teams from HLTV rankings
+        self._teams_cache_time = None  # Timestamp of last team list update
+        self._teams_cache_duration = 86400  # Teams cache duration: 24 hours
 
     def _rate_limit(self):
         """Rate limiting to avoid overloading HLTV"""
@@ -139,20 +161,170 @@ class HLTVScraper:
                 _ = match.time
                 loaded += 1
         logger.info(f"Preloaded {loaded} match datetimes")
+    
+    def get_all_teams(self, use_cache: bool = True) -> set:
+        """Scrape all teams from HLTV rankings page
+        
+        Args:
+            use_cache: If True, use cached team list if available and not expired
+            
+        Returns:
+            Set of team names (lowercase)
+        """
+        # Check if we can use cache
+        if use_cache and self._all_teams is not None and self._teams_cache_time is not None:
+            cache_age = time.time() - self._teams_cache_time
+            if cache_age < self._teams_cache_duration:
+                logger.info(f"Using cached team list ({len(self._all_teams)} teams, age: {int(cache_age/3600)}h)")
+                return self._all_teams
+        
+        # Fetch fresh team list from rankings
+        teams = set()
+        try:
+            self._rate_limit()
+            # Use the current date format that HLTV expects
+            # URL format: /ranking/teams/YEAR/MONTH/MONDAY_DAY
+            # The day number is always a Monday and increments every 7 days
+            # Examples: /ranking/teams/2025/december/1, /ranking/teams/2025/december/8, etc.
+            from datetime import datetime, timedelta
+            
+            now = datetime.now()
+            year = now.year
+            month = now.strftime('%B').lower()
+            
+            # Find the most recent Monday (or today if it's Monday)
+            days_since_monday = now.weekday()  # 0 = Monday, 6 = Sunday
+            if days_since_monday == 0:
+                # Today is Monday
+                monday = now
+            else:
+                # Go back to the most recent Monday
+                monday = now - timedelta(days=days_since_monday)
+            
+            day = monday.day
+            
+            rankings_url = f"{HLTV_BASE_URL}/ranking/teams/{year}/{month}/{day}"
+            logger.info(f"Scraping all teams from {rankings_url}")
+            
+            response = self.session.get(rankings_url, timeout=15)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'lxml')
+            
+            # Find all team containers in the ranking
+            # Each team has a div with class containing 'ranked-team'
+            team_containers = soup.find_all('div', class_='ranked-team')
+            
+            for container in team_containers:
+                # Find team name span
+                name_elem = container.find('span', class_='name')
+                if name_elem:
+                    team_name = name_elem.get_text(strip=True)
+                    if team_name:
+                        teams.add(team_name.lower())
+            
+            # Fallback: also try finding all <span class="name"> elements
+            if not teams:
+                logger.info("No teams found with ranked-team class, trying all name spans")
+                team_elements = soup.find_all('span', class_='name')
+                for elem in team_elements:
+                    team_name = elem.get_text(strip=True)
+                    if team_name:
+                        teams.add(team_name.lower())
+            
+            # Also add teams from current matches to catch new/unranked teams
+            try:
+                matches = self.get_todays_matches(min_stars=0, use_cache=False)
+                for match in matches:
+                    teams.add(match.team1.lower())
+                    teams.add(match.team2.lower())
+                logger.info(f"Added teams from current matches")
+            except Exception as e:
+                logger.warning(f"Could not fetch teams from matches: {e}")
+            
+            if teams:
+                self._all_teams = teams
+                self._teams_cache_time = time.time()
+                logger.info(f"Successfully scraped {len(teams)} teams from HLTV")
+            else:
+                logger.warning("No teams found, using old cache if available")
+                if self._all_teams:
+                    return self._all_teams
+                    
+        except Exception as e:
+            logger.error(f"Error scraping teams: {e}")
+            # Return old cache if available, otherwise empty set
+            if self._all_teams:
+                logger.info(f"Using old team cache ({len(self._all_teams)} teams)")
+                return self._all_teams
+        
+        return teams if teams else set()
 
     def search_team(self, team_name: str) -> bool:
-        """Check if a team exists - simplified version that accepts all teams"""
-        # Simply accept all team names without web scraping
-        # The actual validation happens when matches are fetched
-        # This prevents unnecessary API calls and potential rate limiting
+        """Check if a team exists by validating against HLTV team list
         
-        team_name_lower = team_name.lower()
+        Args:
+            team_name: Name of the team to search for
+            
+        Returns:
+            True if team exists, False otherwise
+        """
+        team_name_lower = team_name.lower().strip()
         
-        # Store in cache for consistency
-        self._team_cache.add(team_name_lower)
+        # Basic validation - reject obviously invalid names
+        if len(team_name_lower) < 2:
+            logger.warning(f"Team name '{team_name}' too short (min 2 characters)")
+            return False
         
-        logger.info(f"Team '{team_name}' accepted")
-        return True
+        if len(team_name_lower) > 30:
+            logger.warning(f"Team name '{team_name}' too long (max 30 characters)")
+            return False
+        
+        # Reject names that are only numbers
+        if team_name_lower.isdigit():
+            logger.warning(f"Team name '{team_name}' cannot be only numbers")
+            return False
+        
+        # Reject names with too many special characters
+        special_char_count = sum(1 for c in team_name_lower if not c.isalnum() and c not in [' ', '-', '.', '_'])
+        if special_char_count > 3:
+            logger.warning(f"Team name '{team_name}' has too many special characters")
+            return False
+        
+        # Get all teams from HLTV
+        all_teams = self.get_all_teams()
+        
+        if not all_teams:
+            # If scraping failed, use fallback list of top teams
+            logger.warning(f"HLTV unavailable, using fallback team list ({len(TOP_TEAMS_FALLBACK)} teams)")
+            all_teams = TOP_TEAMS_FALLBACK
+        
+        # Exact match
+        if team_name_lower in all_teams:
+            logger.info(f"Team '{team_name}' found (exact match)")
+            self._team_cache.add(team_name_lower)
+            return True
+        
+        # Partial match - check if search term is contained in any team name
+        matches = [team for team in all_teams if team_name_lower in team or team in team_name_lower]
+        
+        if matches:
+            if len(matches) == 1:
+                logger.info(f"Team '{team_name}' found as '{matches[0]}' (partial match)")
+                self._team_cache.add(team_name_lower)
+                return True
+            else:
+                # Multiple matches found
+                logger.info(f"Multiple teams found for '{team_name}': {', '.join(matches[:5])}")
+                # Accept if any match is very close
+                for match in matches:
+                    if team_name_lower == match or match.startswith(team_name_lower) or team_name_lower.startswith(match):
+                        logger.info(f"Team '{team_name}' accepted as '{match}'")
+                        self._team_cache.add(team_name_lower)
+                        return True
+        
+        logger.warning(f"Team '{team_name}' not found in team list ({len(all_teams)} teams checked)")
+        return False
 
     def get_todays_matches(self, min_stars: int = 0, use_cache: bool = True) -> List[Match]:
         """Get today's matches from HLTV - only returns truly upcoming matches
