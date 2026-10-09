@@ -1,16 +1,19 @@
 #!/bin/bash
 
-# Farben für Output
+# Output colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Docker Compose Command
 DOCKER_COMPOSE="docker compose"
 
-# Funktionen
+cd "$(dirname "$0")" || exit 1
+
+# Functions
 show_header() {
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}  HLTV Telegram Bot - Docker Manager${NC}"
@@ -18,7 +21,16 @@ show_header() {
     echo ""
 }
 
+check_docker() {
+    if ! command -v docker &> /dev/null; then
+        echo -e "${RED}❌ Docker not found${NC}"
+        echo "WSL2: enable Docker Desktop → Settings → Resources → WSL Integration"
+        exit 1
+    fi
+}
+
 check_env() {
+    check_docker
     if [ ! -f .env ]; then
         echo -e "${YELLOW}⚠️  .env file not found!${NC}"
         echo -e "${YELLOW}Creating .env from .env.example...${NC}"
@@ -74,8 +86,9 @@ start_bot() {
         fi
     fi
     
-    echo -e "${BLUE}🐳 Starting Docker container...${NC}"
-    $DOCKER_COMPOSE up -d
+    echo -e "${BLUE}🐳 Building and starting Docker container...${NC}"
+    # --build is cheap thanks to layer caching and makes sure pulled code is used
+    $DOCKER_COMPOSE up -d --build
     
     if [ $? -eq 0 ]; then
         echo ""

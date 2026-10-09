@@ -1,45 +1,18 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-
-# Virtual Environment
+# Only *.py, requirements.txt and the template DB are copied into the image;
+# this keeps the build context small and secrets out of it.
+.git/
+.env
 .venv/
 venv/
 ENV/
-
-# Database (will be mounted as volume)
+__pycache__/
+*.py[cod]
 data/bot_data.db
 data/*.sqlite
-# Exception: Include template database in image
-!data/initial_bot_data.db
-
-# Logs
+tests/
+*.md
+*.sh
 *.log
 logs/
-bot.log
-
-# Git
-.git/
-.gitignore
-
-# IDE
 .vscode/
 .idea/
-*.swp
-*.swo
-
-# Docker
-Dockerfile
-docker-compose.yml
-.dockerignore
-
-# Scripts
-run_without_docker.sh
-start.sh
-
-# Documentation
-README.md
-.env.example
