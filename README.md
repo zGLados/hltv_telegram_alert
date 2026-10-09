@@ -17,7 +17,7 @@ Or host your own instance using the instructions below.
 - ✅ **Favorite teams** – add/remove one or many teams at once, with spell-checking against the HLTV team list
 - ✅ **Local times** – all match times are shown in your configured timezone
 - ✅ **Responsive** – HLTV scraping runs in the background, the bot never freezes while loading
-- ✅ **Gentle on HLTV** – rate-limited requests and a 30-minute match cache
+- ✅ **Gentle on HLTV** – rate-limited requests, a 30-minute match cache and a match snapshot on disk that survives restarts
 
 ## Commands
 
@@ -100,6 +100,8 @@ All settings are environment variables (read from `.env`):
 | `DAILY_SUMMARY_TIME` | `09:00` | Time of the daily summary (`HH:MM`, in `TIMEZONE`) |
 | `DATABASE_PATH` | `data/bot_data.db` | SQLite database file |
 | `INITIAL_DATABASE_PATH` | `data/initial_bot_data.db` | Template copied to `DATABASE_PATH` on first start |
+| `MATCH_CACHE_FILE` | `match_cache.json` next to the DB | Snapshot of the last fetched match list |
+| `SNAPSHOT_TIME` | `06:00` | Time of the daily match snapshot (`HH:MM`, in `TIMEZONE`) |
 
 Scraper tuning (request delay, cache duration, max. match-page lookups) lives in `config.py`.
 
@@ -124,14 +126,18 @@ HLTV rates matches from 0 to 5 stars based on the teams' ranking:
                 └───────────────────────────────┼───────┘
                                                 ▼
    database.py (SQLite)  ◄──────────  hltv_scraper.py ──► hltv.org
-   users, favorites,                  rate-limited,       (Cloudflare,
-   notifications, teams               cached              via cloudscraper)
+   users, favorites,                  rate-limited,
+   notifications, teams               cached (curl_cffi)
+                                            │
+                                            ▼
+                                   data/match_cache.json
+                                   (match snapshot)
 ```
 
 | File | Purpose |
 |------|---------|
 | `bot.py` | Telegram handlers, scheduled jobs, startup. Blocking scraper calls are run in a worker thread so the bot stays responsive. |
-| `hltv_scraper.py` | Parses `/matches`, `/results`, match pages and the team ranking. All requests are serialised and rate-limited (3 s). |
+| `hltv_scraper.py` | Fetches and parses `/matches`, `/results` and the team ranking. All requests are serialised and rate-limited (3 s); the match list is mirrored to the snapshot file. |
 | `database.py` | SQLite access: users and their star setting, favorites, sent notifications, known teams. |
 | `config.py` | Environment variables and scraper constants. |
 | `data/initial_bot_data.db` | Template database with ~260 HLTV teams (no user data), copied on first start. |
@@ -141,16 +147,31 @@ HLTV rates matches from 0 to 5 stars based on the teams' ranking:
 
 | When | Job |
 |------|-----|
-| On startup | Register commands, refresh match cache, refresh team list (in the background) |
+| On startup | Load the match snapshot from disk, register commands, refresh match list and team list (in the background) |
 | Every 30 min | Refresh the match list and look up kick-off times of rated matches |
 | Every 30 min | Check results and notify fans of finished matches (each match only once) |
 | `DAILY_SUMMARY_TIME` | Daily summary to every user who sent `/start` or has favorites |
 | 03:00 | Refresh the team list from the HLTV ranking + current matches |
 | 04:00 | Delete notification records older than 30 days |
+| `SNAPSHOT_TIME` (06:00) | Daily match snapshot: fresh fetch, logs how many starred matches exist (e.g. `11 starred of 50 matches (1x ☆☆☆☆☆, …)`) |
 
-### Kick-off times
+### HTTP client
 
-The HLTV match list doesn't always contain kick-off times. If it does (`data-unix`), they are used directly; otherwise the match page is fetched once and the time is cached. The cache refresh pre-loads times for rated matches, so commands are usually answered from cache.
+Requests to HLTV are made with [`curl_cffi`](https://github.com/lexiforest/curl_cffi) (`impersonate='chrome'`), which behaves like a regular browser. Keep its default headers – don't add a custom User-Agent to the session.
+
+Requests are serialised with at least 3 seconds between them. A normal 30-minute refresh is a single request, because the match list already contains kick-off times.
+
+### Match snapshot
+
+Every successful fetch of the match list is written atomically to `data/match_cache.json` (fetch time, number of starred matches, all matches). On startup the bot loads it (dropping matches that started more than 6 hours ago), so it can answer immediately and still has data if HLTV is temporarily unreachable. The daily snapshot job at `SNAPSHOT_TIME` forces a fresh fetch shortly before the daily summary and logs a star breakdown.
+
+### Parsing notes
+
+- **Kick-off times** come from `data-unix` in the match list. If that ever disappears, the match page is fetched once per match and cached.
+- **Live** means "kick-off has passed and the match is still listed". HLTV's `matchLive` CSS class is on *every* rating element and can't be used.
+- **Event names** come from `data-event-headline`, with the URL slug as fallback.
+- **TBD fixtures** (teams not yet known) are skipped.
+- **Results**: the featured block at the top of `/results` has no timestamps and repeats matches; the timestamped main-list entry wins and untimed leftovers are dropped.
 
 ### Team validation
 
@@ -188,7 +209,7 @@ Changes are documented in [CHANGELOG.md](CHANGELOG.md).
 
 **"Team not found"** – use the name as shown on HLTV (e.g. `Natus Vincere`, `MOUZ`); the bot suggests similar names. If the list is empty, check the logs for team-refresh errors.
 
-**No matches found** – HLTV is protected by Cloudflare and sometimes blocks automated requests (HTTP 403). The bot keeps serving the last cached data and retries every 30 minutes. Check the logs for `Error fetching matches`.
+**No matches found** – check the logs for `Error fetching matches`. The bot keeps serving the last snapshot and retries every 30 minutes. If requests keep failing, try updating `curl_cffi`.
 
 **Wrong times** – set `TIMEZONE` in `.env` and restart.
 
@@ -234,4 +255,4 @@ Pull requests are welcome! For major changes, please open an issue first. Please
 
 ## Disclaimer
 
-This bot is an unofficial project and is not affiliated with HLTV.org. Use it responsibly and don't overload HLTV's servers. HLTV uses Cloudflare anti-scraping protection, so fetching data may not always work.
+This bot is an unofficial project and is not affiliated with HLTV.org. Use it responsibly and don't overload HLTV's servers. If HLTV changes its website, fetching data may temporarily stop working.

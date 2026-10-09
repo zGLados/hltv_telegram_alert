@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from bs4 import BeautifulSoup
@@ -10,6 +11,7 @@ from hltv_scraper import HLTVScraper, Match
 MATCHES_HTML = '''
 <div class="match">
   <a href="/matches/2380001/faze-vs-natus-vincere-iem-cologne-2026">
+    <div class="match-event" data-event-headline="IEM Cologne 2026">IEM Cologne 2026</div>
     <div class="match-time" data-unix="1791561600000">18:00</div>
     <div class="match-team"><div class="match-teamname">FaZe</div></div>
     <div class="match-team"><div class="match-teamname">Natus Vincere</div></div>
@@ -34,6 +36,16 @@ MATCHES_HTML = '''
 '''
 
 RESULTS_HTML = '''
+<div class="big-results">
+  <div class="result-con">
+    <a class="a-reset" href="/matches/2370001/g2-vs-vitality-blast-premier">
+      <div class="team">G2</div><div class="team">Vitality</div><i class="fa fa-star"></i></a>
+  </div>
+  <div class="result-con">
+    <a class="a-reset" href="/matches/2360000/faze-vs-mouz-last-week">
+      <div class="team">FaZe</div><div class="team">MOUZ</div><i class="fa fa-star"></i></a>
+  </div>
+</div>
 <div class="result-con" data-zonedgrouping-entry-unix="%d">
   <a class="a-reset" href="/matches/2370001/g2-vs-vitality-blast-premier">
     <div class="team">G2</div>
@@ -61,18 +73,30 @@ def test_parse_matches_page():
 
     faze = matches[0]
     assert (faze.team1, faze.team2, faze.stars, faze.status) == ('FaZe', 'Natus Vincere', 2, 'upcoming')
-    assert faze.event == 'Iem Cologne 2026'
+    assert faze.event == 'IEM Cologne 2026'  # from data-event-headline
     assert faze.time == datetime(2026, 10, 9, 16, 0, tzinfo=timezone.utc)
 
     big = matches[1]
-    assert (big.stars, big.status, big.time) == (0, 'live', None)
+    assert (big.stars, big.time) == (0, None)
+    assert big.event == 'Cct Season 3'  # fallback: derived from the URL slug
+    # HLTV puts "matchLive" on every rating element, it must not mean live
+    assert not big.is_live
+
+
+def test_is_live_means_kickoff_passed():
+    now = datetime.now(timezone.utc)
+    assert Match('1', 'A', 'B', 'E', 1, time=now - timedelta(minutes=5)).is_live
+    assert not Match('1', 'A', 'B', 'E', 1, time=now + timedelta(minutes=5)).is_live
+    assert not Match('1', 'A', 'B', 'E', 1, time=now - timedelta(minutes=5), status='finished').is_live
 
 
 def test_parse_results_page_and_age_filter():
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     results = HLTVScraper.parse_results_page(soup(RESULTS_HTML % now_ms))
-    assert len(results) == 2
+    # featured duplicate merged (gets the timestamp), untimed old featured result dropped
+    assert [r.match_id for r in results] == ['2370001', '2370000']
     g2 = results[0]
+    assert g2.time is not None
     assert (g2.match_id, g2.team1, g2.team2, g2.score, g2.event, g2.stars) == (
         '2370001', 'G2', 'Vitality', '2-1', 'BLAST Premier', 1)
 
@@ -137,6 +161,44 @@ def test_resolve_times_uses_cache_and_limit(scraper):
     assert len(calls) == 2
 
 
-def test_rankings_url_uses_last_monday():
-    assert HLTVScraper._rankings_url(datetime(2026, 10, 9)).endswith('/ranking/teams/2026/october/5')
-    assert HLTVScraper._rankings_url(datetime(2026, 11, 1)).endswith('/ranking/teams/2026/october/26')
+def test_snapshot_file_roundtrip(tmp_path):
+    cache_file = str(tmp_path / 'match_cache.json')
+    scraper = HLTVScraper(cache_file=cache_file)
+    scraper._get = lambda url, timeout=15: soup(MATCHES_HTML)
+    assert len(scraper.get_upcoming_matches()) == 2
+
+    data = json.loads(open(cache_file).read())
+    assert data['starred_count'] == 1 and len(data['matches']) == 2
+
+    # A new instance (= bot restart) serves the snapshot without any request
+    restarted = HLTVScraper(cache_file=cache_file)
+    restarted._get = lambda url, timeout=15: pytest.fail('should use the snapshot')
+    loaded = restarted.get_upcoming_matches()
+    assert loaded == scraper.get_upcoming_matches()
+
+
+def test_snapshot_drops_finished_matches_and_survives_garbage(tmp_path):
+    cache_file = tmp_path / 'match_cache.json'
+    old = Match('1', 'A', 'B', 'E', 1, time=datetime.now(timezone.utc) - timedelta(hours=7))
+    new = Match('2', 'C', 'D', 'E', 1, time=datetime.now(timezone.utc) + timedelta(hours=1))
+    cache_file.write_text(json.dumps({'fetched_at': datetime.now(timezone.utc).isoformat(),
+                                      'matches': [old.to_dict(), new.to_dict()]}))
+    assert [m.match_id for m in HLTVScraper(cache_file=str(cache_file)).get_upcoming_matches()] == ['2']
+
+    cache_file.write_text('{not json')
+    broken = HLTVScraper(cache_file=str(cache_file))
+    broken._get = lambda url, timeout=15: (_ for _ in ()).throw(RuntimeError('403'))
+    assert broken.get_upcoming_matches() == []
+
+
+def test_failed_fetch_keeps_previous_data(tmp_path):
+    scraper = HLTVScraper()
+    scraper._get = lambda url, timeout=15: soup(MATCHES_HTML)
+    first = scraper.get_upcoming_matches()
+    fetched_at = scraper.matches_fetched_at
+
+    def blocked(url, timeout=15):
+        raise RuntimeError('403 Forbidden')
+    scraper._get = blocked
+    assert scraper.get_upcoming_matches(use_cache=False) == first
+    assert scraper.matches_fetched_at == fetched_at

@@ -23,36 +23,22 @@ DAILY_SUMMARY_AT = dtime(hour=_hour, minute=_minute)
 DATABASE_PATH = os.getenv('DATABASE_PATH', 'data/bot_data.db')
 # Shipped template with the pre-loaded team list; copied on first start.
 INITIAL_DATABASE_PATH = os.getenv('INITIAL_DATABASE_PATH', 'data/initial_bot_data.db')
+# JSON snapshot of the last successfully fetched match list (next to the DB).
+MATCH_CACHE_FILE = os.getenv(
+    'MATCH_CACHE_FILE', os.path.join(os.path.dirname(DATABASE_PATH) or '.', 'match_cache.json'))
+# Time of the daily match snapshot (HH:MM in TIMEZONE), before the summary.
+SNAPSHOT_TIME = os.getenv('SNAPSHOT_TIME', '06:00')
 
 # --- HLTV ---------------------------------------------------------------------
 HLTV_BASE_URL = 'https://www.hltv.org'
 HLTV_MATCHES_URL = f'{HLTV_BASE_URL}/matches'
 HLTV_RESULTS_URL = f'{HLTV_BASE_URL}/results'
+HLTV_RANKING_URL = f'{HLTV_BASE_URL}/ranking/teams'
 
 # Minimum seconds between two requests to HLTV.
 REQUEST_DELAY = 3
 # How long the match list is cached (seconds). Also the refresh interval.
 MATCH_CACHE_SECONDS = 30 * 60
-# Max. match pages fetched per cache refresh to look up kick-off times.
+# Max. match pages fetched per cache refresh to look up kick-off times
+# (only needed if the match list ever stops carrying them).
 MAX_TIME_LOOKUPS_PER_REFRESH = 40
-
-# Browser-like headers for HLTV requests. "zstd" is deliberately not offered:
-# requests cannot decode it and would hand us garbage.
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9,de;q=0.8',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Platform': '"Windows"',
-    'Cache-Control': 'max-age=0',
-    'Referer': 'https://www.hltv.org/',
-    'DNT': '1',
-}

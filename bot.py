@@ -8,6 +8,7 @@ directly on the loop.
 import asyncio
 import html
 import logging
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Tuple
 
@@ -21,8 +22,8 @@ from telegram.ext import (
 )
 
 from config import (
-    DAILY_SUMMARY_AT, DATABASE_PATH, INITIAL_DATABASE_PATH, MATCH_CACHE_SECONDS,
-    MAX_TIME_LOOKUPS_PER_REFRESH, TELEGRAM_BOT_TOKEN, TZ,
+    DAILY_SUMMARY_AT, DATABASE_PATH, INITIAL_DATABASE_PATH, MATCH_CACHE_FILE,
+    MATCH_CACHE_SECONDS, MAX_TIME_LOOKUPS_PER_REFRESH, SNAPSHOT_TIME, TELEGRAM_BOT_TOKEN, TZ,
 )
 from database import Database
 from hltv_scraper import HLTVScraper, Match
@@ -53,7 +54,7 @@ COMMANDS = [
 ]
 
 db = Database(DATABASE_PATH, INITIAL_DATABASE_PATH)
-scraper = HLTVScraper(db)
+scraper = HLTVScraper(db, cache_file=MATCH_CACHE_FILE)
 
 
 # --- Helpers ------------------------------------------------------------------------
@@ -69,7 +70,7 @@ def is_today(match: Match) -> bool:
 
 def starts_within(match: Match, hours: int) -> bool:
     """Live, or kick-off within the next `hours` (match list only holds unfinished matches)."""
-    if match.status == 'live':
+    if match.is_live:
         return True
     return match.time is not None and match.time <= datetime.now(timezone.utc) + timedelta(hours=hours)
 
@@ -149,13 +150,31 @@ def fetch_summary_matches(favorite_teams: Iterable[str]) -> List[Match]:
     return sorted((m for m in matches if is_today(m)), key=by_time)
 
 
-def refresh_match_cache():
+def refresh_match_cache() -> bool:
+    """Fetch the match list from HLTV (also rewrites the snapshot file).
+    Returns False if HLTV couldn't be reached and the old data is kept."""
+    before = scraper.matches_fetched_at
     matches = scraper.get_upcoming_matches(use_cache=False)
+    if scraper.matches_fetched_at == before:
+        logger.warning("Match refresh failed, keeping previous match list")
+        return False
     important = [m for m in matches if m.stars >= 1]
     fetched = scraper.resolve_times(important, limit=MAX_TIME_LOOKUPS_PER_REFRESH)
     scraper.prune_time_cache()
-    logger.info(f"Match cache refreshed: {len(matches)} matches, "
-                f"{fetched} kick-off times fetched")
+    logger.info(f"Match cache refreshed: {len(matches)} matches, {len(important)} with stars, "
+                f"{fetched} kick-off times looked up")
+    return True
+
+
+def daily_snapshot():
+    """Daily fresh fetch of the match list; logs how many starred matches exist."""
+    ok = refresh_match_cache()
+    matches = scraper.get_upcoming_matches()
+    per_star = Counter(m.stars for m in matches if m.stars >= 1)
+    breakdown = ', '.join(f"{n}x {'☆' * stars}" for stars, n in sorted(per_star.items(), reverse=True))
+    logger.info(f"Daily snapshot {'saved' if ok else 'FAILED (using previous data)'}: "
+                f"{sum(per_star.values())} starred of {len(matches)} matches "
+                f"({breakdown or 'none'}) -> {MATCH_CACHE_FILE}")
 
 
 # --- Bot ----------------------------------------------------------------------------
@@ -210,6 +229,9 @@ class TelegramBot:
                   seconds=MATCH_CACHE_SECONDS, id='refresh_cache')
         s.add_job(self.load_teams, CronTrigger(hour=3, minute=0), id='daily_team_refresh')
         s.add_job(self.prune_notifications, CronTrigger(hour=4, minute=0), id='prune')
+        snap_hour, snap_minute = map(int, SNAPSHOT_TIME.split(':'))
+        s.add_job(self.daily_snapshot, CronTrigger(hour=snap_hour, minute=snap_minute),
+                  id='daily_snapshot')
 
     async def on_startup(self, application: Application):
         """Runs once the event loop is up, before polling starts."""
@@ -287,8 +309,8 @@ class TelegramBot:
                 "Use /setminstar <number> to change the minimum rating.")
             return
 
-        live = [m for m in upcoming if m.status == 'live']
-        upcoming = [m for m in upcoming if m.status != 'live']
+        live = [m for m in upcoming if m.is_live]
+        upcoming = [m for m in upcoming if not m.is_live]
         parts = [
             f"<b>⭐ Important Matches (last &amp; next {hours}h):</b>\n"
             f"<i>Total: {len(finished) + len(live) + len(upcoming)} matches ({min_stars}+ stars)</i>"
@@ -495,6 +517,9 @@ class TelegramBot:
 
     async def refresh_match_cache(self):
         await asyncio.to_thread(refresh_match_cache)
+
+    async def daily_snapshot(self):
+        await asyncio.to_thread(daily_snapshot)
 
     async def load_teams(self):
         teams = await asyncio.to_thread(scraper.refresh_teams)

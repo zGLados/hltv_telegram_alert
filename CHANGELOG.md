@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-09 – Reliable HLTV access & match snapshot
+
+### Changed
+- **HTTP client: `cloudscraper` → `curl_cffi`** (browser impersonation). HLTV requests failed with HTTP 403 before; they now work locally and in the Docker image. `requests`, `cloudscraper` and `brotli` are no longer needed; custom headers were removed.
+- Event names are read from `data-event-headline` instead of being guessed from the URL.
+- Team ranking is fetched from `/ranking/teams` (redirects to the latest ranking) instead of computing the last Monday's URL.
+
+### Added
+- **Match snapshot file** `data/match_cache.json`: written on every successful fetch, loaded on startup.
+- **Daily snapshot job** (`SNAPSHOT_TIME`, default 06:00) that logs how many starred matches exist.
+
+### Fixed
+- Matches were marked **live** although they hadn't started: HLTV's `matchLive` class is on every rating element. Live now means "kick-off has passed".
+- Old featured results without timestamps could show up as "last 24 h"; duplicates now keep the full, timestamped main-list entry.
+
 ## 2026-10-09 – Refactoring
 
 ### Fixed
