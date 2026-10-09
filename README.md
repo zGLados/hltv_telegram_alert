@@ -51,7 +51,7 @@ If a team name is ambiguous or misspelled, the bot rejects it and suggests match
 
 ### Option 1: Docker (recommended) 🐳
 
-Prerequisites: Docker with Docker Compose v2 (WSL2: Docker Desktop with WSL integration, see [DOCKER.md](DOCKER.md)).
+Prerequisites: Docker with Docker Compose v2 (WSL2: Docker Desktop with WSL integration, see [docs/DOCKER.md](docs/DOCKER.md)).
 
 ```bash
 git clone https://github.com/zGLados/hltv_telegram_alert.git
@@ -64,7 +64,7 @@ nano .env            # add your bot token from @BotFather
 ./docker.sh logs -f  # follow logs
 ```
 
-More commands (`stop`, `restart --pull`, `rebuild`, …) are described in [DOCKER.md](DOCKER.md).
+More commands (`stop`, `restart --pull`, `rebuild`, …) are described in [docs/DOCKER.md](docs/DOCKER.md).
 
 ### Option 2: Without Docker
 
@@ -80,7 +80,7 @@ python3 -m venv .venv
 cp .env.example .env
 nano .env            # add your bot token
 
-./run_without_docker.sh
+./scripts/run_local.sh
 ```
 
 ### Creating a Telegram bot
@@ -99,11 +99,11 @@ All settings are environment variables (read from `.env`):
 | `TIMEZONE` | `Europe/Berlin` | Timezone for "today", the daily summary and displayed times |
 | `DAILY_SUMMARY_TIME` | `09:00` | Time of the daily summary (`HH:MM`, in `TIMEZONE`) |
 | `DATABASE_PATH` | `data/bot_data.db` | SQLite database file |
-| `INITIAL_DATABASE_PATH` | `data/initial_bot_data.db` | Template copied to `DATABASE_PATH` on first start |
+| `INITIAL_DATABASE_PATH` | `assets/initial_bot_data.db` | Template copied to `DATABASE_PATH` on first start |
 | `MATCH_CACHE_FILE` | `match_cache.json` next to the DB | Snapshot of the last fetched match list |
 | `SNAPSHOT_TIME` | `06:00` | Time of the daily match snapshot (`HH:MM`, in `TIMEZONE`) |
 
-Scraper tuning (request delay, cache duration, max. match-page lookups) lives in `config.py`.
+Scraper tuning (request delay, cache duration, max. match-page lookups) lives in `hltv_bot/config.py`.
 
 ### Star ratings
 
@@ -125,7 +125,7 @@ HLTV rates matches from 0 to 5 stars based on the teams' ranking:
                 │        └── asyncio.to_thread ─┐       │
                 └───────────────────────────────┼───────┘
                                                 ▼
-   database.py (SQLite)  ◄──────────  hltv_scraper.py ──► hltv.org
+   database.py (SQLite)  ◄──────────  scraper.py ──► hltv.org
    users, favorites,                  rate-limited,
    notifications, teams               cached (curl_cffi)
                                             │
@@ -134,14 +134,31 @@ HLTV rates matches from 0 to 5 stars based on the teams' ranking:
                                    (match snapshot)
 ```
 
-| File | Purpose |
-|------|---------|
-| `bot.py` | Telegram handlers, scheduled jobs, startup. Blocking scraper calls are run in a worker thread so the bot stays responsive. |
-| `hltv_scraper.py` | Fetches and parses `/matches`, `/results` and the team ranking. All requests are serialised and rate-limited (3 s); the match list is mirrored to the snapshot file. |
-| `database.py` | SQLite access: users and their star setting, favorites, sent notifications, known teams. |
-| `config.py` | Environment variables and scraper constants. |
-| `data/initial_bot_data.db` | Template database with ~260 HLTV teams (no user data), copied on first start. |
-| `tests/` | pytest suite (parsers, team search, database, message helpers). |
+### Project structure
+
+```
+hltv_telegram_alert/
+├── hltv_bot/                 # application package – start with: python -m hltv_bot
+│   ├── __main__.py           #   entry point
+│   ├── bot.py                #   Telegram handlers, scheduled jobs, startup
+│   ├── scraper.py            #   HLTV fetching/parsing, rate limit, match snapshot
+│   ├── database.py           #   SQLite: users, favorites, notifications, known teams
+│   └── config.py             #   environment variables and scraper constants
+├── assets/
+│   └── initial_bot_data.db   # team-list template (~260 teams, no user data)
+├── data/                     # runtime data, not in git (created automatically)
+│   ├── bot_data.db           #   users and favorites
+│   └── match_cache.json      #   match snapshot
+├── tests/                    # pytest suite (runs offline)
+├── docs/DOCKER.md            # Docker details and troubleshooting
+├── scripts/run_local.sh      # start without Docker
+├── docker.sh                 # Docker management (start, logs, restart --pull, …)
+├── Dockerfile, docker-compose.yml
+├── requirements.txt, requirements-dev.txt
+└── .env.example              # configuration template
+```
+
+`bot.py` runs all blocking scraper calls in a worker thread so the bot stays responsive. `scraper.py` serialises and rate-limits every HLTV request (3 s) and mirrors the match list to the snapshot file.
 
 ### Scheduled jobs
 
@@ -184,12 +201,12 @@ Team names you add are checked against the known-team list in the database:
 
 The list starts with the shipped template and is refreshed daily from HLTV. New teams are **merged** into the list; a failed or partial scrape never removes teams.
 
-To update the template that new installations start with, copy the `valid_teams` table of a running instance into `data/initial_bot_data.db` (it must contain no user data) and commit it:
+To update the template that new installations start with, copy the `valid_teams` table of a running instance into `assets/initial_bot_data.db` (it must contain no user data) and commit it:
 
 ```bash
-sqlite3 data/initial_bot_data.db "ATTACH 'data/bot_data.db' AS live;
+sqlite3 assets/initial_bot_data.db "ATTACH 'data/bot_data.db' AS live;
   DELETE FROM valid_teams; INSERT INTO valid_teams SELECT * FROM live.valid_teams;"
-git add data/initial_bot_data.db && git commit -m "Update team template"
+git add assets/initial_bot_data.db && git commit -m "Update team template"
 ```
 
 ## Development
@@ -199,7 +216,7 @@ git add data/initial_bot_data.db && git commit -m "Update team template"
 .venv/bin/python -m pytest
 ```
 
-The tests use small HTML snippets that mirror HLTV's markup, so they run offline. If HLTV changes its page structure, update the parser in `hltv_scraper.py` together with the snippets in `tests/test_scraper.py`.
+The tests use small HTML snippets that mirror HLTV's markup, so they run offline. If HLTV changes its page structure, update the parser in `hltv_bot/scraper.py` together with the snippets in `tests/test_scraper.py`.
 
 Changes are documented in [CHANGELOG.md](CHANGELOG.md).
 
@@ -233,7 +250,7 @@ After=network-online.target
 Type=simple
 User=your_username
 WorkingDirectory=/path/to/hltv_telegram_alert
-ExecStart=/path/to/hltv_telegram_alert/.venv/bin/python bot.py
+ExecStart=/path/to/hltv_telegram_alert/.venv/bin/python -m hltv_bot
 Restart=always
 
 [Install]

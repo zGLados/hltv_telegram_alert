@@ -1,6 +1,6 @@
 import pytest
 
-from database import Database
+from hltv_bot.database import Database
 
 
 @pytest.fixture

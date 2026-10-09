@@ -1,4 +1,4 @@
-from bot import parse_team_list, split_message
+from hltv_bot.bot import parse_team_list, split_message
 
 
 def test_parse_team_list():

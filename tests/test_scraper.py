@@ -4,8 +4,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from bs4 import BeautifulSoup
 
-from database import Database
-from hltv_scraper import HLTVScraper, Match
+from hltv_bot.database import Database
+from hltv_bot.scraper import HLTVScraper, Match
 
 # Minimal HTML mirroring the HLTV structures the parser relies on.
 MATCHES_HTML = '''

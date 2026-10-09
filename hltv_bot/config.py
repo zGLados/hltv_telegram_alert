@@ -22,7 +22,7 @@ DAILY_SUMMARY_AT = dtime(hour=_hour, minute=_minute)
 # --- Storage ------------------------------------------------------------------
 DATABASE_PATH = os.getenv('DATABASE_PATH', 'data/bot_data.db')
 # Shipped template with the pre-loaded team list; copied on first start.
-INITIAL_DATABASE_PATH = os.getenv('INITIAL_DATABASE_PATH', 'data/initial_bot_data.db')
+INITIAL_DATABASE_PATH = os.getenv('INITIAL_DATABASE_PATH', 'assets/initial_bot_data.db')
 # JSON snapshot of the last successfully fetched match list (next to the DB).
 MATCH_CACHE_FILE = os.getenv(
     'MATCH_CACHE_FILE', os.path.join(os.path.dirname(DATABASE_PATH) or '.', 'match_cache.json'))

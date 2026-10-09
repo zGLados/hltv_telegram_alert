@@ -1,14 +1,17 @@
-# Only *.py, requirements.txt and the template DB are copied into the image;
+# Only requirements.txt, hltv_bot/ and assets/ are copied into the image;
 # this keeps the build context small and secrets out of it.
 .git/
+.github/
 .env
 .venv/
 venv/
 ENV/
-__pycache__/
+**/__pycache__/
 *.py[cod]
-data/bot_data.db
-data/*.sqlite
+.pytest_cache/
+data/
+docs/
+scripts/
 tests/
 *.md
 *.sh

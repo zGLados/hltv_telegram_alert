@@ -22,7 +22,7 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple
 from bs4 import BeautifulSoup
 from curl_cffi import requests as curl_requests
 
-from config import (
+from .config import (
     HLTV_BASE_URL, HLTV_MATCHES_URL, HLTV_RANKING_URL, HLTV_RESULTS_URL,
     MATCH_CACHE_SECONDS, REQUEST_DELAY, TZ,
 )

@@ -4,12 +4,12 @@
 venv/
 ENV/
 
-# Database
+# Runtime data (database, match snapshot) - never commit user data
+data/
 *.db
 *.sqlite
-data/*
-# But include the initial database template with teams (no user data)
-!data/initial_bot_data.db
+# Shipped team-list template (no user data)
+!assets/initial_bot_data.db
 
 # Python
 __pycache__/

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-09 – Project structure
+
+### Changed
+- Application code moved into the `hltv_bot/` package (`hltv_scraper.py` → `hltv_bot/scraper.py`); start with `python -m hltv_bot`.
+- Team-list template moved from `data/` to `assets/initial_bot_data.db`; `data/` now only holds runtime files and is fully gitignored.
+- `DOCKER.md` → `docs/DOCKER.md`, `run_without_docker.sh` → `scripts/run_local.sh`.
+- Logging is configured in `main()` instead of at import time.
+- English comments in `docker-compose.yml`.
+
+**Upgrading an existing installation:** nothing to do for Docker (`./docker.sh restart --pull`); existing `data/bot_data.db` is kept. Without Docker, start the bot with `python -m hltv_bot` (or `scripts/run_local.sh`); systemd units need `ExecStart=… -m hltv_bot`.
+
 ## 2026-10-09 – Reliable HLTV access & match snapshot
 
 ### Changed

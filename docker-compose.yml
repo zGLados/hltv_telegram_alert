@@ -3,23 +3,23 @@ services:
     build: .
     container_name: hltv-telegram-bot
     restart: unless-stopped
-    
-    # Environment-Variablen aus .env Datei
+
+    # Environment variables from .env
     env_file:
       - .env
-    
-    # Volume für persistente Datenbank
+
+    # Persistent runtime data (database, match snapshot)
     volumes:
       - ./data:/app/data
-    
-    # Logging-Konfiguration
+
+    # Log rotation
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-    
-    # Ressourcen-Limits (optional)
+
+    # Resource limits (optional)
     deploy:
       resources:
         limits:

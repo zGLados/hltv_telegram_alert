@@ -86,7 +86,7 @@ docker compose exec hltv-bot bash
 
 The database lives in `./data/bot_data.db` on the host (mounted to `/app/data`) and survives container rebuilds.
 On the very first start it is created from the team-list template that is baked into the image
-(`/app/template/initial_bot_data.db`), so the bot works even with an empty `./data/` directory.
+(`/app/assets/initial_bot_data.db`), so the bot works even with an empty `./data/` directory.
 
 ## Logs
 

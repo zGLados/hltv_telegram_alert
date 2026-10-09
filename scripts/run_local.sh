@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run the bot directly with the local virtualenv (see README → "Without Docker").
-cd "$(dirname "$0")" || exit 1
+cd "$(dirname "$0")/.." || exit 1
 
 if [ ! -f .env ]; then
     echo "❌ .env not found - copy .env.example to .env and add your bot token"
@@ -14,4 +14,4 @@ if [ ! -d .venv ]; then
 fi
 
 echo "🚀 Starting bot..."
-exec .venv/bin/python bot.py
+exec .venv/bin/python -m hltv_bot

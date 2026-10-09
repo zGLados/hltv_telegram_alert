@@ -21,19 +21,13 @@ from telegram.ext import (
     Application, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters,
 )
 
-from config import (
+from .config import (
     DAILY_SUMMARY_AT, DATABASE_PATH, INITIAL_DATABASE_PATH, MATCH_CACHE_FILE,
     MATCH_CACHE_SECONDS, MAX_TIME_LOOKUPS_PER_REFRESH, SNAPSHOT_TIME, TELEGRAM_BOT_TOKEN, TZ,
 )
-from database import Database
-from hltv_scraper import HLTVScraper, Match
+from .database import Database
+from .scraper import HLTVScraper, Match
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-)
-# httpx logs every Telegram long-poll request at INFO level
-logging.getLogger('httpx').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 AWAITING_TEAM_NAME = 1
@@ -541,12 +535,19 @@ class TelegramBot:
         self.application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
+def setup_logging():
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO,
+    )
+    # httpx logs every Telegram long-poll request at INFO level
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+
+
 def main():
+    setup_logging()
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN not set! Please create a .env file.")
         raise SystemExit(1)
     TelegramBot().run()
 
-
-if __name__ == '__main__':
-    main()
