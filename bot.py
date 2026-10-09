@@ -8,7 +8,7 @@ directly on the loop.
 import asyncio
 import html
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Tuple
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -36,6 +36,7 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 AWAITING_TEAM_NAME = 1
+TODAY_WINDOW_HOURS = 24  # /today: results of the last and matches of the next N hours
 MAX_SUMMARY_MATCHES = 15
 SUMMARY_TIME_STR = DAILY_SUMMARY_AT.strftime('%H:%M')
 
@@ -46,7 +47,7 @@ COMMANDS = [
     ('remove', 'Remove favorite team(s)'),
     ('favorites', 'Show your favorite teams'),
     ('setminstar', 'Set minimum star rating 1-5 (e.g. /setminstar 2)'),
-    ('today', "Show today's important matches"),
+    ('today', 'Important matches of the last and next 24 hours'),
     ('favgames', 'Show the next game of each favorite team'),
     ('cancel', 'Cancel the current action'),
 ]
@@ -64,6 +65,13 @@ def today_local():
 def is_today(match: Match) -> bool:
     local = match.local_time
     return local is not None and local.date() == today_local()
+
+
+def starts_within(match: Match, hours: int) -> bool:
+    """Live, or kick-off within the next `hours` (match list only holds unfinished matches)."""
+    if match.status == 'live':
+        return True
+    return match.time is not None and match.time <= datetime.now(timezone.utc) + timedelta(hours=hours)
 
 
 def by_time(match: Match):
@@ -106,16 +114,16 @@ def format_matches(matches: Iterable[Match]) -> str:
 
 # --- Blocking data access (always called through asyncio.to_thread) ------------------
 
-def fetch_today(min_stars: int) -> Tuple[List[Match], List[Match]]:
-    """(finished today, upcoming/live today) with at least `min_stars`."""
+def fetch_window(min_stars: int, hours: int) -> Tuple[List[Match], List[Match]]:
+    """(finished in the last `hours`, live + starting in the next `hours`)
+    with at least `min_stars`."""
     upcoming = scraper.get_upcoming_matches(min_stars)
     scraper.resolve_times(upcoming)
-    upcoming_today = sorted((m for m in upcoming if is_today(m)), key=by_time)
+    upcoming = sorted((m for m in upcoming if starts_within(m, hours)), key=by_time)
 
-    results = scraper.get_recent_results(hours=24)
-    finished_today = [r for r in results
-                      if r.stars >= min_stars and (r.time is None or is_today(r))]
-    return finished_today, upcoming_today
+    results = scraper.get_recent_results(hours=hours)
+    finished = [r for r in results if r.stars >= min_stars]
+    return finished, upcoming
 
 
 def fetch_next_games(teams: List[str]) -> Dict[str, Match]:
@@ -232,7 +240,7 @@ class TelegramBot:
             "🎮 <b>Welcome to the HLTV CS2 Match Bot!</b>\n\n"
             "I keep you informed about the most important CS2 matches of the day.\n\n"
             "<b>Available Commands:</b>\n"
-            "/today - Show today's important matches\n"
+            "/today - Important matches of the last and next 24 hours\n"
             "/favgames - Show the next game of each favorite team\n"
             "/setminstar &lt;number&gt; - Set minimum star rating (1-5)\n"
             "/favorites - Show your favorite teams\n"
@@ -254,7 +262,8 @@ class TelegramBot:
             "/favorites - Your favorite teams\n\n"
             "/setminstar &lt;number&gt; - Minimum HLTV star rating (1-5) for /today "
             "and the daily summary. Example: /setminstar 2\n\n"
-            "/today - Today's finished and upcoming matches with your star rating\n\n"
+            "/today - Results of the last 24 hours, live matches and matches of the "
+            "next 24 hours with your star rating\n\n"
             "/favgames - The next game of each favorite team\n\n"
             "/cancel - Cancel the current action\n\n"
             "<b>Automatic Notifications:</b>\n"
@@ -265,25 +274,31 @@ class TelegramBot:
         )
 
     async def today_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Today's finished and upcoming matches with the user's minimum stars."""
+        """Matches with the user's minimum stars: results of the last 24 h,
+        live matches and matches starting within the next 24 h."""
         min_stars = db.get_min_stars(update.effective_user.id)
         await update.message.reply_text(f"🔍 Searching for matches with {min_stars}+ stars...")
 
-        finished, upcoming = await asyncio.to_thread(fetch_today, min_stars)
+        hours = TODAY_WINDOW_HOURS
+        finished, upcoming = await asyncio.to_thread(fetch_window, min_stars, hours)
         if not finished and not upcoming:
             await update.message.reply_text(
-                f"No matches with {min_stars}+ stars found for today. 😔\n"
+                f"No matches with {min_stars}+ stars in the last or next {hours} hours. 😔\n"
                 "Use /setminstar <number> to change the minimum rating.")
             return
 
+        live = [m for m in upcoming if m.status == 'live']
+        upcoming = [m for m in upcoming if m.status != 'live']
         parts = [
-            f"<b>⭐ Important Matches Today ({today_local():%d.%m.%Y}):</b>\n"
-            f"<i>Total: {len(finished) + len(upcoming)} matches ({min_stars}+ stars)</i>"
+            f"<b>⭐ Important Matches (last &amp; next {hours}h):</b>\n"
+            f"<i>Total: {len(finished) + len(live) + len(upcoming)} matches ({min_stars}+ stars)</i>"
         ]
         if finished:
             parts += ["<b>✅ Finished:</b>", format_matches(finished)]
+        if live:
+            parts += ["<b>🔴 Live:</b>", format_matches(live)]
         if upcoming:
-            parts += ["<b>🕐 Upcoming:</b>", format_matches(upcoming)]
+            parts += [f"<b>🕐 Next {hours}h:</b>", format_matches(upcoming)]
         await reply_html(update, '\n\n'.join(parts))
 
     async def setminstar_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

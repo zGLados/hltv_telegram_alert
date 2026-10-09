@@ -19,6 +19,7 @@
 - `Accept-Encoding: zstd` was sent although `requests` can't decode it.
 
 ### Added
+- `/today` shows a rolling window: results of the last 24 h, live matches (own section) and matches of the next 24 h, instead of the calendar day.
 - Daily summary includes today's games of your favorite teams.
 - "Did you mean …" suggestions for unknown team names.
 - `/cancel` in the command menu, global error handler.

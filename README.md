@@ -13,7 +13,7 @@ Or host your own instance using the instructions below.
 
 - ✅ **Daily summary** – every morning (default 09:00) today's matches matching your star rating, plus all games of your favorite teams
 - ✅ **Result notifications** – a message as soon as one of your favorite teams has finished a match
-- ✅ **Star rating filter** – choose the minimum HLTV rating (1–5 ☆) for `/today` and the summary
+- ✅ **Star rating filter** – choose the minimum HLTV rating (1–5 ☆) for `/today` (last & next 24 h) and the summary
 - ✅ **Favorite teams** – add/remove one or many teams at once, with spell-checking against the HLTV team list
 - ✅ **Local times** – all match times are shown in your configured timezone
 - ✅ **Responsive** – HLTV scraping runs in the background, the bot never freezes while loading
@@ -29,7 +29,7 @@ Or host your own instance using the instructions below.
 | `/remove [team]` | Remove favorite team(s) (case-insensitive) |
 | `/favorites` | Show your favorite teams |
 | `/setminstar <1-5>` | Set the minimum star rating (default: 1) |
-| `/today` | Today's finished and upcoming matches with your star rating |
+| `/today` | Results of the last 24 h, live matches and matches starting in the next 24 h, filtered by your star rating |
 | `/favgames` | The next game of each favorite team |
 | `/cancel` | Cancel the current `/add` or `/remove` dialog |
 
