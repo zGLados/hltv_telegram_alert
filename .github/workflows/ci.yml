@@ -47,7 +47,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build image
-        run: docker build -t hltv-bot:ci .
+        # Official python image via the AWS ECR mirror of Docker Hub's library;
+        # Docker Hub itself answers shared GitHub runners with 429 rate limits.
+        run: >
+          docker build -t hltv-bot:ci
+          --build-arg BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-slim .
 
       - name: Smoke test
         # Without a token the bot must exit with the "token not set" error,

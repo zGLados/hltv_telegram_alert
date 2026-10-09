@@ -1,4 +1,7 @@
-FROM python:3.12-slim
+# Overridable so CI can pull the same official image from a mirror
+# (Docker Hub rate-limits shared CI runners).
+ARG BASE_IMAGE=python:3.12-slim
+FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
