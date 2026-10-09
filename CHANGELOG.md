@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-09 – Continuous integration
+
+### Added
+- GitHub Actions workflow: pyflakes + pytest on Python 3.12, Docker image build with a start-up smoke test; runs on pushes to `main`, pull requests and manually.
+- CI badge in the README; `pyflakes` pinned in `requirements-dev.txt`.
+
 ## 2026-10-09 – Project structure
 
 ### Changed

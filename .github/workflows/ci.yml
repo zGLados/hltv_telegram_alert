@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only token: the workflow only checks code, it never writes to the repo
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (Python 3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'  # same as the Docker image
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint (pyflakes)
+        run: python -m pyflakes hltv_bot tests
+
+      - name: Run tests
+        run: python -m pytest -v
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t hltv-bot:ci .
+
+      - name: Smoke test
+        # Without a token the bot must exit with the "token not set" error,
+        # which proves the package imports and the entry point work.
+        run: |
+          set +e
+          output=$(docker run --rm hltv-bot:ci 2>&1)
+          code=$?
+          echo "$output"
+          [ "$code" -eq 1 ] && echo "$output" | grep -q "TELEGRAM_BOT_TOKEN not set"

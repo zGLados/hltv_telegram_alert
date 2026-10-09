@@ -1,5 +1,7 @@
 # 🎮 HLTV Telegram Alert Bot
 
+[![CI](https://github.com/zGLados/hltv_telegram_alert/actions/workflows/ci.yml/badge.svg)](https://github.com/zGLados/hltv_telegram_alert/actions/workflows/ci.yml)
+
 A Telegram bot that keeps you informed about the most important CS2 matches on [HLTV.org](https://www.hltv.org) and notifies you about your favorite teams.
 
 ## 🤖 Public Bot Instance
@@ -150,6 +152,7 @@ hltv_telegram_alert/
 │   ├── bot_data.db           #   users and favorites
 │   └── match_cache.json      #   match snapshot
 ├── tests/                    # pytest suite (runs offline)
+├── .github/workflows/ci.yml  # CI: lint, tests, Docker build
 ├── docs/DOCKER.md            # Docker details and troubleshooting
 ├── scripts/run_local.sh      # start without Docker
 ├── docker.sh                 # Docker management (start, logs, restart --pull, …)
@@ -213,8 +216,11 @@ git add assets/initial_bot_data.db && git commit -m "Update team template"
 
 ```bash
 .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
-.venv/bin/python -m pytest
+.venv/bin/python -m pyflakes hltv_bot tests   # lint
+.venv/bin/python -m pytest                    # tests
 ```
+
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same lint and tests on every push and pull request, and builds the Docker image with a start-up smoke test.
 
 The tests use small HTML snippets that mirror HLTV's markup, so they run offline. If HLTV changes its page structure, update the parser in `hltv_bot/scraper.py` together with the snippets in `tests/test_scraper.py`.
 
