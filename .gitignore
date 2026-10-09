@@ -30,3 +30,6 @@ logs/
 
 # Tests
 .pytest_cache/
+
+# Personal Claude Code context (see CLAUDE.md for the shared part)
+CLAUDE.local.md
