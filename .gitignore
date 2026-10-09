@@ -27,3 +27,6 @@ __pycache__/
 # Logs
 *.log
 logs/
+
+# Tests
+.pytest_cache/

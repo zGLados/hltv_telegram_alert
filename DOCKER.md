@@ -32,30 +32,19 @@ If you don't want to integrate Docker Desktop with WSL, you can run Docker comma
 
 ### Using docker.sh (Recommended)
 
-The `docker.sh` script provides convenient management commands:
+`docker.sh` can be run from any directory and checks that Docker and a bot token are available.
 
-```bash
-# Start bot (automatically pulls latest git changes and builds)
-./docker.sh start
-
-# Stop bot
-./docker.sh stop
-
-# Restart bot (quick restart without rebuild)
-./docker.sh restart
-
-# Rebuild bot (pulls git changes and does full rebuild)
-./docker.sh rebuild
-
-# View logs
-./docker.sh logs
-
-# View logs with live updates
-./docker.sh logs -f
-
-# Check container status
-./docker.sh status
-```
+| Command | What it does |
+|---------|--------------|
+| `./docker.sh start` | Build (cached) and start the container |
+| `./docker.sh start --pull` | `git pull`, then build and start |
+| `./docker.sh stop` | Stop the container |
+| `./docker.sh restart` | Quick restart, no rebuild (code changes are **not** picked up) |
+| `./docker.sh restart --pull` | `git pull`, rebuild and restart – use this to deploy updates |
+| `./docker.sh rebuild` | `down` + full rebuild of the local code, no git pull |
+| `./docker.sh status` | Container status |
+| `./docker.sh logs` / `logs -f` | Last 50 log lines / follow live |
+| `./docker.sh down` | Stop and remove the container (database is kept) |
 
 ### Manual Docker Compose Commands
 
@@ -95,7 +84,9 @@ docker compose exec hltv-bot bash
 
 ## Database
 
-The database is stored in the `./data/` directory and persists even after deleting the container.
+The database lives in `./data/bot_data.db` on the host (mounted to `/app/data`) and survives container rebuilds.
+On the very first start it is created from the team-list template that is baked into the image
+(`/app/template/initial_bot_data.db`), so the bot works even with an empty `./data/` directory.
 
 ## Logs
 
@@ -148,8 +139,8 @@ chmod 644 data/bot_data.db
 When you have code updates:
 
 ```bash
-# Using docker.sh (automatically pulls latest git changes)
-./docker.sh rebuild
+# Using docker.sh (pulls, rebuilds and restarts)
+./docker.sh restart --pull
 
 # Or manually
 git pull
@@ -167,7 +158,3 @@ The container has the following default limits:
 - **RAM**: Max 512 MB, Min 128 MB
 
 These can be adjusted in `docker-compose.yml`.
-
-## Auto-Update Feature
-
-The `docker.sh start` and `docker.sh rebuild` commands automatically pull the latest changes from git before building, ensuring you're always running the most recent version.
