@@ -1,727 +1,383 @@
-import requests
-import cloudscraper
-from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+"""Scraper for HLTV.org (upcoming matches, results, team rankings).
+
+All methods here do blocking network I/O. The bot calls them via
+`asyncio.to_thread`, so this class is written to be thread-safe: every HTTP
+request goes through `_get`, which serialises requests and enforces the rate
+limit.
+"""
+import html
 import logging
 import re
+import threading
 import time
-from config import HLTV_BASE_URL, HLTV_MATCHES_URL, HLTV_RESULTS_URL, HEADERS
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Iterable, List, Optional, Set, Tuple
+
+import cloudscraper
+from bs4 import BeautifulSoup
+
+from config import (
+    HEADERS, HLTV_BASE_URL, HLTV_MATCHES_URL, HLTV_RESULTS_URL,
+    MATCH_CACHE_SECONDS, REQUEST_DELAY, TZ,
+)
 
 logger = logging.getLogger(__name__)
 
-class Match:
-    """Represents an HLTV Match"""
-    def __init__(self, match_id: str, team1: str, team2: str, 
-                 event: str, time: Optional[datetime], stars: int, 
-                 score: Optional[str] = None, status: str = "upcoming"):
-        self.match_id = match_id
-        self.team1 = team1
-        self.team2 = team2
-        self.event = event
-        self._time = time
-        self.stars = stars
-        self.score = score
-        self.status = status
-        self._match_url = None
-        self._scraper = None
-    
-    @property
-    def time(self) -> Optional[datetime]:
-        """Lazy load match time from match page if not set"""
-        if self._time is None and self._match_url and self._scraper:
-            logger.info(f"Lazy loading datetime for match {self.match_id}...")
-            self._time = self._scraper._get_match_datetime_from_page(self._match_url)
-        return self._time
-    
-    @time.setter
-    def time(self, value):
-        self._time = value
-    
-    def get_match_url(self) -> str:
-        """Get the full HLTV match URL"""
-        if self._match_url:
-            return f"{HLTV_BASE_URL}{self._match_url}"
-        return f"{HLTV_BASE_URL}/matches/{self.match_id}"
-    
-    def format_for_telegram(self) -> str:
-        """Format match for Telegram with HTML markup and link"""
-        url = self.get_match_url()
-        
-        # Star rating using white star (☆)
-        stars_display = "☆" * self.stars if self.stars > 0 else "No rating"
-        
-        if self.score:
-            # Finished match
-            return (
-                f'<a href="{url}">{self.team1} vs {self.team2}</a>\n'
-                f'Result: {self.score}\n'
-                f'Rating: {stars_display}\n'
-                f'@ {self.event}'
-            )
-        elif self.time:
-            # Upcoming match with time
-            date_str = self.time.strftime("%d %b")
-            time_str = self.time.strftime("%H:%M UTC")
-            return (
-                f'<a href="{url}">{self.team1} vs {self.team2}</a>\n'
-                f'Rating: {stars_display}\n'
-                f'{date_str} {time_str} @ {self.event}'
-            )
-        else:
-            # No time available
-            return (
-                f'<a href="{url}">{self.team1} vs {self.team2}</a>\n'
-                f'Rating: {stars_display}\n'
-                f'@ {self.event}'
-            )
+MATCH_URL_RE = re.compile(r'^/matches/(\d+)/')
 
-    def __str__(self):
-        if self.score:
-            return f"{self.team1} vs {self.team2} - {self.score}\n📍 {self.event}"
-        elif self.time:
-            date_str = self.time.strftime("%d.%m.%Y")
-            time_str = self.time.strftime("%H:%M")
-            return f"{self.team1} vs {self.team2}\n📅 {date_str} | ⏰ {time_str}\n📍 {self.event}"
-        else:
-            return f"{self.team1} vs {self.team2}\n📍 {self.event}"
+
+@dataclass
+class Match:
+    """An HLTV match: upcoming/live (no score) or finished (with score)."""
+    match_id: str
+    team1: str
+    team2: str
+    event: str
+    stars: int
+    url_path: str = ''
+    time: Optional[datetime] = None  # timezone-aware (UTC) kick-off / finish time
+    score: Optional[str] = None
+    status: str = 'upcoming'  # upcoming | live | finished
+
+    @property
+    def url(self) -> str:
+        return f"{HLTV_BASE_URL}{self.url_path or f'/matches/{self.match_id}'}"
+
+    @property
+    def local_time(self) -> Optional[datetime]:
+        return self.time.astimezone(TZ) if self.time else None
 
     def has_team(self, team_name: str) -> bool:
-        """Check if a team is playing in this match"""
-        team_name_lower = team_name.lower()
-        return (team_name_lower in self.team1.lower() or 
-                team_name_lower in self.team2.lower())
+        """Exact (case-insensitive) team match. Substring matching would make
+        'BIG' also match 'BIG EQUIPA'."""
+        name = team_name.casefold()
+        return name in (self.team1.casefold(), self.team2.casefold())
+
+    def format_for_telegram(self) -> str:
+        """HTML snippet for Telegram (all scraped text is escaped)."""
+        title = f'<a href="{html.escape(self.url)}">{html.escape(self.team1)} vs {html.escape(self.team2)}</a>'
+        stars = '☆' * self.stars if self.stars > 0 else 'No rating'
+        event = html.escape(self.event)
+        lines = [title]
+        if self.score:
+            lines.append(f'Result: {html.escape(self.score)}')
+        if self.status == 'live':
+            lines.append('🔴 LIVE')
+        lines.append(f'Rating: {stars}')
+        local = self.local_time
+        if local and not self.score:
+            lines.append(f'{local.strftime("%d %b %H:%M %Z")} @ {event}')
+        else:
+            lines.append(f'@ {event}')
+        return '\n'.join(lines)
+
+
+def _from_unix_ms(value) -> Optional[datetime]:
+    try:
+        return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc)
+    except (TypeError, ValueError):
+        return None
 
 
 class HLTVScraper:
-    """Scraper for HLTV.org"""
-    
-    def __init__(self):
-        # Create scraper with enhanced browser properties
+    def __init__(self, db=None):
+        self.db = db  # used to persist and validate team names
         self.session = cloudscraper.create_scraper(
-            browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'desktop': True
-            },
-            delay=10  # Initial delay for Cloudflare challenge
+            browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True},
+            delay=10,  # initial delay for the Cloudflare challenge
         )
         self.session.headers.update(HEADERS)
-        self._team_cache = set()  # Cache for found teams
-        self._last_request_time = 0
-        self._request_delay = 3  # Increase delay to 3 seconds
-        self._datetime_cache = {}  # Cache for match datetimes to avoid duplicate requests
-        self._matches_cache = None  # Cache for all matches
-        self._matches_cache_time = None  # Timestamp of last cache update
-        self._cache_duration = 1800  # Cache duration in seconds (30 minutes)
-        self._all_teams = None  # Cache for all teams from HLTV rankings
-        self._teams_cache_time = None  # Timestamp of last team list update
-        self._teams_cache_duration = 86400  # Teams cache duration: 24 hours
-        self.db = None  # Database instance for team validation
 
-    def set_database(self, db):
-        """Set database instance for team validation"""
-        self.db = db
+        self._request_lock = threading.Lock()
+        self._last_request_time = 0.0
 
-    def _rate_limit(self):
-        """Rate limiting to avoid overloading HLTV"""
-        current_time = time.time()
-        time_since_last = current_time - self._last_request_time
-        if time_since_last < self._request_delay:
-            time.sleep(self._request_delay - time_since_last)
-        self._last_request_time = time.time()
-    
-    def preload_match_datetimes(self, matches: List[Match], max_matches: int = 20):
-        """Eagerly load datetimes for a list of matches to populate cache
-        
-        Args:
-            matches: List of matches to load datetimes for
-            max_matches: Maximum number of matches to load (to avoid too many requests)
-        """
-        logger.info(f"Preloading datetimes for up to {max_matches} matches...")
-        loaded = 0
-        for match in matches[:max_matches]:
-            if match._match_url and match._time is None:
-                # Access .time property to trigger lazy loading
-                _ = match.time
-                loaded += 1
-        logger.info(f"Preloaded {loaded} match datetimes")
-    
-    def get_all_teams(self, use_cache: bool = True) -> set:
-        """Scrape all teams from HLTV rankings page
-        
-        Args:
-            use_cache: If True, use cached team list if available and not expired
-            
-        Returns:
-            Set of team names (lowercase)
-        """
-        # Check if we can use cache
-        if use_cache and self._all_teams is not None and self._teams_cache_time is not None:
-            cache_age = time.time() - self._teams_cache_time
-            if cache_age < self._teams_cache_duration:
-                logger.info(f"Using cached team list ({len(self._all_teams)} teams, age: {int(cache_age/3600)}h)")
-                return self._all_teams
-        
-        # Fetch fresh team list from rankings
-        teams = set()
-        try:
-            self._rate_limit()
-            # Use the current date format that HLTV expects
-            # URL format: /ranking/teams/YEAR/MONTH/MONDAY_DAY
-            # The day number is always a Monday and increments every 7 days
-            # Examples: /ranking/teams/2025/december/1, /ranking/teams/2025/december/8, etc.
-            from datetime import datetime, timedelta
-            
-            now = datetime.now()
-            year = now.year
-            month = now.strftime('%B').lower()
-            
-            # Find the most recent Monday (or today if it's Monday)
-            days_since_monday = now.weekday()  # 0 = Monday, 6 = Sunday
-            if days_since_monday == 0:
-                # Today is Monday
-                monday = now
-            else:
-                # Go back to the most recent Monday
-                monday = now - timedelta(days=days_since_monday)
-            
-            day = monday.day
-            
-            rankings_url = f"{HLTV_BASE_URL}/ranking/teams/{year}/{month}/{day}"
-            logger.info(f"Scraping all teams from {rankings_url}")
-            
-            response = self.session.get(rankings_url, timeout=15)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'lxml')
-            
-            # Find all team containers in the ranking
-            # Each team has a div with class containing 'ranked-team'
-            team_containers = soup.find_all('div', class_='ranked-team')
-            
-            for container in team_containers:
-                # Find team name span
-                name_elem = container.find('span', class_='name')
-                if name_elem:
-                    team_name = name_elem.get_text(strip=True)
-                    if team_name:
-                        teams.add(team_name.lower())
-            
-            # Fallback: also try finding all <span class="name"> elements
-            if not teams:
-                logger.info("No teams found with ranked-team class, trying all name spans")
-                team_elements = soup.find_all('span', class_='name')
-                for elem in team_elements:
-                    team_name = elem.get_text(strip=True)
-                    if team_name:
-                        teams.add(team_name.lower())
-            
-            # Also add teams from current matches to catch new/unranked teams
+        self._matches_cache: Optional[List[Match]] = None
+        self._matches_cache_time = 0.0
+        self._datetime_cache: Dict[str, datetime] = {}  # url_path -> kick-off time
+
+    # --- HTTP -------------------------------------------------------------------
+
+    def _get(self, url: str, timeout: int = 15) -> BeautifulSoup:
+        """Rate-limited, serialised GET. Raises on HTTP errors."""
+        with self._request_lock:
+            wait = REQUEST_DELAY - (time.monotonic() - self._last_request_time)
+            if wait > 0:
+                time.sleep(wait)
             try:
-                matches = self.get_todays_matches(min_stars=0, use_cache=False)
-                for match in matches:
-                    teams.add(match.team1.lower())
-                    teams.add(match.team2.lower())
-                logger.info(f"Added teams from current matches")
+                response = self.session.get(url, timeout=timeout)
+            finally:
+                self._last_request_time = time.monotonic()
+        response.raise_for_status()
+        return BeautifulSoup(response.text, 'lxml')
+
+    # --- Upcoming matches -----------------------------------------------------------
+
+    def get_upcoming_matches(self, min_stars: int = 0, use_cache: bool = True) -> List[Match]:
+        """Upcoming and live matches from /matches, filtered by star rating.
+
+        Returns an empty list if HLTV can't be reached and nothing is cached.
+        """
+        cache_fresh = (time.time() - self._matches_cache_time) < MATCH_CACHE_SECONDS
+        if not (use_cache and self._matches_cache is not None and cache_fresh):
+            try:
+                soup = self._get(HLTV_MATCHES_URL)
+                self._matches_cache = self.parse_matches_page(soup)
+                self._matches_cache_time = time.time()
+                for match in self._matches_cache:
+                    if match.time is None:
+                        match.time = self._datetime_cache.get(match.url_path)
+                logger.info(f"Fetched {len(self._matches_cache)} upcoming matches")
             except Exception as e:
-                logger.warning(f"Could not fetch teams from matches: {e}")
-            
-            if teams:
-                self._all_teams = teams
-                self._teams_cache_time = time.time()
-                logger.info(f"Successfully scraped {len(teams)} teams from HLTV")
-                
-                # Update database with teams
-                if self.db:
-                    self.db.update_valid_teams(teams)
-                    logger.info(f"Updated database with {len(teams)} valid teams")
-            else:
-                logger.warning("No teams found, using old cache if available")
-                if self._all_teams:
-                    return self._all_teams
-                    
-        except Exception as e:
-            logger.error(f"Error scraping teams: {e}")
-            # Return old cache if available, otherwise empty set
-            if self._all_teams:
-                logger.info(f"Using old team cache ({len(self._all_teams)} teams)")
-                return self._all_teams
-        
-        return teams if teams else set()
+                logger.error(f"Error fetching matches: {e}")
+                if self._matches_cache is None:
+                    return []
+                logger.info("Serving stale match cache")
+        return [m for m in self._matches_cache if m.stars >= min_stars]
 
-    def search_team(self, team_name: str) -> tuple[bool, str]:
-        """Check if a team exists by validating against database
-        
-        Args:
-            team_name: Name of the team to search for
-            
-        Returns:
-            Tuple of (exists: bool, correct_name: str)
-            - If team exists: (True, "Correct Team Name")
-            - If team doesn't exist: (False, original_input)
+    @classmethod
+    def parse_matches_page(cls, soup: BeautifulSoup) -> List[Match]:
+        matches, seen = [], set()
+        for div in soup.find_all('div', class_='match'):
+            # Only the plain match containers, not e.g. "match-wrapper" decorations
+            if len(div.get('class', [])) > 3:
+                continue
+            try:
+                match = cls._parse_match_container(div)
+            except Exception as e:
+                logger.error(f"Error parsing match container: {e}")
+                continue
+            if match and match.match_id not in seen:
+                seen.add(match.match_id)
+                matches.append(match)
+        return matches
+
+    @staticmethod
+    def _parse_match_container(container) -> Optional[Match]:
+        link = container.find('a', href=MATCH_URL_RE)
+        if not link:
+            return None
+        url_path = link['href']
+        match_id = MATCH_URL_RE.match(url_path).group(1)
+
+        team_divs = container.find_all('div', class_='match-team')
+        if len(team_divs) < 2:
+            return None
+        names = [d.find('div', class_='match-teamname') for d in team_divs[:2]]
+        if not all(names):
+            return None
+        team1, team2 = (n.get_text(strip=True) for n in names)
+        if not team1 or not team2:
+            return None
+
+        stars, status = 0, 'upcoming'
+        rating = container.find('div', class_='match-rating')
+        if rating:
+            stars = sum(1 for s in rating.find_all('i', class_='fa-star')
+                        if 'faded' not in s.get('class', []))
+            if 'matchLive' in rating.get('class', []):
+                status = 'live'
+
+        # Kick-off time, if the list page carries it (saves a match-page request)
+        unix_elem = container.find(attrs={'data-unix': True})
+        kickoff = _from_unix_ms(unix_elem['data-unix']) if unix_elem else None
+
+        return Match(
+            match_id=match_id, team1=team1, team2=team2,
+            event=HLTVScraper._event_from_slug(url_path, team1, team2),
+            stars=stars, url_path=url_path, time=kickoff, status=status,
+        )
+
+    @staticmethod
+    def _event_from_slug(url_path: str, team1: str, team2: str) -> str:
+        """Derive the event name from /matches/<id>/<team1>-vs-<team2>-<event>."""
+        parts = url_path.split('/')
+        if len(parts) < 4 or not parts[3]:
+            return 'Unknown Event'
+        slug = parts[3]
+        t1 = team1.lower().replace(' ', '-').replace('.', '')
+        t2 = team2.lower().replace(' ', '-').replace('.', '')
+        for prefix in (f'{t1}-vs-{t2}-', f'{t2}-vs-{t1}-'):
+            if slug.startswith(prefix):
+                slug = slug[len(prefix):]
+                break
+        return slug.replace('-', ' ').title()
+
+    # --- Kick-off times -----------------------------------------------------------
+
+    def resolve_times(self, matches: Iterable[Match], limit: Optional[int] = None) -> int:
+        """Fill in missing kick-off times by fetching match pages (cached per URL).
+
+        Returns the number of match pages fetched.
         """
-        team_name_input = team_name.strip()
-        team_name_lower = team_name_input.lower()
-        
-        # Basic validation - reject obviously invalid names
-        if len(team_name_lower) < 2:
-            logger.warning(f"Team name '{team_name}' too short (min 2 characters)")
-            return (False, team_name_input)
-        
-        if len(team_name_lower) > 30:
-            logger.warning(f"Team name '{team_name}' too long (max 30 characters)")
-            return (False, team_name_input)
-        
-        # Reject names that are only numbers
-        if team_name_lower.isdigit():
-            logger.warning(f"Team name '{team_name}' cannot be only numbers")
-            return (False, team_name_input)
-        
-        # Reject names with too many special characters
-        special_char_count = sum(1 for c in team_name_lower if not c.isalnum() and c not in [' ', '-', '.', '_'])
-        if special_char_count > 3:
-            logger.warning(f"Team name '{team_name}' has too many special characters")
-            return (False, team_name_input)
-        
-        # Try database first if available
-        if self.db:
-            valid_teams = self.db.get_valid_teams()
-            if valid_teams:
-                # Exact match (case-insensitive)
-                for team in valid_teams:
-                    if team_name_lower == team.lower():
-                        logger.info(f"Team '{team_name}' found in database (exact match) -> '{team}'")
-                        return (True, team)
-                
-                # Partial match
-                matches = [team for team in valid_teams if team_name_lower in team.lower() or team.lower() in team_name_lower]
-                if matches:
-                    if len(matches) == 1:
-                        logger.info(f"Team '{team_name}' found in database as '{matches[0]}' (partial match)")
-                        return (True, matches[0])
-                    else:
-                        # Multiple matches - accept close ones
-                        for match in matches:
-                            match_lower = match.lower()
-                            if team_name_lower == match_lower or match_lower.startswith(team_name_lower) or team_name_lower.startswith(match_lower):
-                                logger.info(f"Team '{team_name}' accepted from database as '{match}'")
-                                return (True, match)
-                
-                logger.warning(f"Team '{team_name}' not found in database ({len(valid_teams)} teams)")
-                return (False, team_name_input)
-        
-        # No database or database is empty - reject the team
-        logger.error(f"No valid teams in database, cannot validate '{team_name}'")
-        return (False, team_name_input)
+        fetched = 0
+        for match in matches:
+            if match.time is not None or not match.url_path:
+                continue
+            if match.url_path in self._datetime_cache:
+                match.time = self._datetime_cache[match.url_path]
+                continue
+            if limit is not None and fetched >= limit:
+                break
+            match.time = self._fetch_match_time(match.url_path)
+            fetched += 1
+        return fetched
 
-    def get_todays_matches(self, min_stars: int = 0, use_cache: bool = True) -> List[Match]:
-        """Get today's matches from HLTV - only returns truly upcoming matches
-        
-        Args:
-            min_stars: Minimum star rating for matches
-            use_cache: If True, use cached matches if available and not expired
+    def _fetch_match_time(self, url_path: str) -> Optional[datetime]:
+        try:
+            soup = self._get(f"{HLTV_BASE_URL}{url_path}", timeout=10)
+        except Exception as e:
+            logger.error(f"Error fetching match page {url_path}: {e}")
+            return None
+        elem = soup.find(attrs={'data-unix': True})
+        kickoff = _from_unix_ms(elem['data-unix']) if elem else None
+        if kickoff:
+            self._datetime_cache[url_path] = kickoff
+        else:
+            logger.warning(f"No kick-off time found on {url_path}")
+        return kickoff
+
+    def prune_time_cache(self):
+        """Drop cached kick-off times of matches that are no longer listed."""
+        if self._matches_cache is None:
+            return
+        listed = {m.url_path for m in self._matches_cache}
+        for key in list(self._datetime_cache):
+            if key not in listed:
+                del self._datetime_cache[key]
+
+    # --- Results ------------------------------------------------------------------
+
+    def get_recent_results(self, hours: int = 24, limit: int = 50) -> List[Match]:
+        """Recently finished matches from /results.
+
+        If HLTV provides a finish timestamp, results older than `hours` are
+        dropped; otherwise the newest `limit` results are returned.
         """
-        # Check if we can use cache
-        if use_cache and self._matches_cache is not None and self._matches_cache_time is not None:
-            cache_age = time.time() - self._matches_cache_time
-            if cache_age < self._cache_duration:
-                logger.info(f"Using cached matches (age: {int(cache_age)}s / {self._cache_duration}s)")
-                # Filter by min_stars from cache
-                return [m for m in self._matches_cache if m.stars >= min_stars]
-        
-        # Fetch fresh matches
         try:
-            self._rate_limit()
-            # Don't use date parameter as HLTV shows same matches on multiple days
-            # Just get the main matches page
-            response = self.session.get(HLTV_MATCHES_URL, timeout=15)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'lxml')
-            matches = []
-            current_date = datetime.now().date()
-            
-            # Find all match containers
-            all_divs = soup.find_all('div', class_=True)
-            
-            for div in all_divs:
-                classes = div.get('class', [])
-                
-                # Check for match container
-                if 'match' in classes and len(classes) <= 3:
-                    try:
-                        match = self._parse_match_container(div, current_date)
-                        if match:
-                            matches.append(match)
-                    except Exception as e:
-                        logger.error(f"Error parsing a match: {e}")
-                        continue
-            
-            # Remove duplicates based on match_id
-            seen_ids = set()
-            unique_matches = []
-            for match in matches:
-                if match.match_id not in seen_ids:
-                    seen_ids.add(match.match_id)
-                    unique_matches.append(match)
-            
-            logger.info(f"Found {len(unique_matches)} unique matches (filtered {len(matches) - len(unique_matches)} duplicates)")
-            
-            # Update cache
-            self._matches_cache = unique_matches
-            self._matches_cache_time = time.time()
-            logger.info(f"Updated matches cache with {len(unique_matches)} matches")
-            
-            # Filter by min_stars
-            return [m for m in unique_matches if m.stars >= min_stars]
-            
-        except Exception as e:
-            logger.error(f"Error fetching matches: {e}")
-            return []
-    
-    def get_matches_for_date(self, date: datetime.date, min_stars: int = 0) -> List[Match]:
-        """Get matches for a specific date from HLTV"""
-        try:
-            self._rate_limit()
-            # Use HLTV's date parameter to get matches for specific date
-            url = f"{HLTV_MATCHES_URL}?selectedDate={date}"
-            response = self.session.get(url, timeout=15)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'lxml')
-            matches = []
-            
-            # Find all match containers
-            # Since we're using the date parameter, all matches on this page are for this date
-            all_divs = soup.find_all('div', class_=True)
-            
-            for div in all_divs:
-                classes = div.get('class', [])
-                
-                # Check for match container (simple match div with few classes)
-                if 'match' in classes and len(classes) <= 3:
-                    try:
-                        # Pass the date we know this match is for
-                        match = self._parse_match_container(div, date)
-                        if match and match.stars >= min_stars:
-                            matches.append(match)
-                    except Exception as e:
-                        logger.error(f"Error parsing a match: {e}")
-                        continue
-            
-            # Remove duplicates based on match_id, team1, team2, and time
-            seen = {}
-            unique_matches = []
-            for match in matches:
-                # Use match_id as primary key, with teams and time as fallback
-                key = (match.match_id, match.team1, match.team2, match.time)
-                if key not in seen:
-                    seen[key] = True
-                    unique_matches.append(match)
-            
-            logger.info(f"Found {len(unique_matches)} unique matches for {date} (filtered {len(matches) - len(unique_matches)} duplicates)")
-            return unique_matches
-            
-        except Exception as e:
-            logger.error(f"Error fetching matches for {date}: {e}")
-            return []
-
-    def _get_match_datetime_from_page(self, match_url: str) -> Optional[datetime]:
-        """Fetch the match page and extract the actual datetime from countdown or data attributes"""
-        # Check cache first
-        if match_url in self._datetime_cache:
-            logger.debug(f"Using cached datetime for {match_url}")
-            return self._datetime_cache[match_url]
-        
-        try:
-            self._rate_limit()
-            # match_url is the full path like /matches/2388091/mouz-vs-parivision-starladder-budapest-major-2025
-            full_url = f"https://www.hltv.org{match_url}"
-            response = self.session.get(full_url, timeout=10)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'lxml')
-            
-            # Look for Unix timestamp in data-unix attribute
-            unix_elements = soup.find_all(attrs={'data-unix': True})
-            if unix_elements:
-                unix_timestamp = int(unix_elements[0]['data-unix'])
-                # Unix timestamp is in milliseconds
-                match_datetime = datetime.fromtimestamp(unix_timestamp / 1000)
-                logger.debug(f"Match {match_url}: Found datetime from Unix timestamp: {match_datetime}")
-                # Cache the result
-                self._datetime_cache[match_url] = match_datetime
-                return match_datetime
-            
-            # Fallback: Look for time element with datetime attribute
-            time_elem = soup.find('div', class_='time')
-            if time_elem:
-                unix_attr = time_elem.get('data-unix')
-                if unix_attr:
-                    unix_timestamp = int(unix_attr)
-                    match_datetime = datetime.fromtimestamp(unix_timestamp / 1000)
-                    logger.debug(f"Match {match_url}: Found datetime from time element: {match_datetime}")
-                    # Cache the result
-                    self._datetime_cache[match_url] = match_datetime
-                    return match_datetime
-            
-            logger.warning(f"Match {match_url}: Could not find datetime on match page")
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error fetching match page {match_url}: {e}")
-            return None
-
-    def _parse_match_container(self, container, match_date: datetime.date = None) -> Optional[Match]:
-        """Parse a match container (new HLTV structure)"""
-        try:
-            # Match ID and event name from URL
-            match_link = container.find('a', href=re.compile(r'/matches/\d+/'))
-            if not match_link:
-                return None
-            
-            match_url = match_link.get('href', '')
-            match_parts = match_url.split('/')
-            if len(match_parts) < 3:
-                return None
-            
-            match_id = match_parts[2]
-            
-            # Teams
-            team_divs = container.find_all('div', class_='match-team')
-            if len(team_divs) < 2:
-                return None
-            
-            team1_elem = team_divs[0].find('div', class_='match-teamname')
-            team2_elem = team_divs[1].find('div', class_='match-teamname')
-            
-            if not team1_elem or not team2_elem:
-                return None
-            
-            team1_name = team1_elem.get_text(strip=True)
-            team2_name = team2_elem.get_text(strip=True)
-            
-            if not team1_name or not team2_name:
-                return None
-            
-            # Extract event name from URL and remove team names
-            # URL format: /matches/ID/team1-vs-team2-event-name
-            event = "Unknown Event"
-            if len(match_parts) > 3:
-                url_slug = match_parts[3]
-                # Remove team names from the slug (they appear at the beginning)
-                # Convert team names to lowercase and replace spaces with hyphens
-                team1_slug = team1_name.lower().replace(' ', '-').replace('.', '')
-                team2_slug = team2_name.lower().replace(' ', '-').replace('.', '')
-                
-                # Remove "team1-vs-team2-" pattern from the beginning
-                event_slug = url_slug
-                for pattern in [f"{team1_slug}-vs-{team2_slug}-", f"{team2_slug}-vs-{team1_slug}-"]:
-                    if event_slug.startswith(pattern):
-                        event_slug = event_slug[len(pattern):]
-                        break
-                
-                # Clean up and format the event name
-                event = event_slug.replace('-', ' ').title()
-            
-            # Stars (importance) - count only non-faded stars
-            stars = 0
-            star_container = container.find('div', class_='match-rating')
-            if star_container:
-                star_icons = star_container.find_all('i', class_='fa-star')
-                # Count only stars without 'faded' class
-                stars = len([s for s in star_icons if 'faded' not in s.get('class', [])])
-            
-            # Check status (live match?)
-            status = "upcoming"
-            if star_container and 'matchLive' in star_container.get('class', []):
-                status = "live"
-            
-            # Create match object with match_url stored for lazy datetime fetching
-            match = Match(
-                match_id=match_id,
-                team1=team1_name,
-                team2=team2_name,
-                event=event,
-                time=None,  # Will be set lazily when needed
-                stars=stars,
-                status=status
-            )
-            
-            # Store the URL in a custom attribute for lazy fetching
-            match._match_url = match_url
-            match._scraper = self  # Reference to scraper for lazy fetching
-            
-            return match
-            
-        except Exception as e:
-            logger.error(f"Error parsing match container: {e}")
-            return None
-
-    def _parse_date_header(self, date_text: str) -> datetime.date:
-        """Parse HLTV date header (e.g., 'Today', 'Tomorrow', 'Wednesday 4th of December 2025')"""
-        try:
-            date_text = date_text.lower().strip()
-            today = datetime.now().date()
-            
-            if 'today' in date_text:
-                return today
-            elif 'tomorrow' in date_text:
-                return today + timedelta(days=1)
-            else:
-                # Try to parse specific date formats from HLTV
-                # Format: "Wednesday 4th of December 2025" or similar
-                # Extract day, month, year using regex
-                import re
-                
-                # Try to find day number (1-31)
-                day_match = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\b', date_text)
-                
-                # Try to find month name
-                months = {
-                    'january': 1, 'february': 2, 'march': 3, 'april': 4,
-                    'may': 5, 'june': 6, 'july': 7, 'august': 8,
-                    'september': 9, 'october': 10, 'november': 11, 'december': 12
-                }
-                month_num = None
-                for month_name, month_val in months.items():
-                    if month_name in date_text:
-                        month_num = month_val
-                        break
-                
-                # Try to find year (2024, 2025, etc.)
-                year_match = re.search(r'\b(20\d{2})\b', date_text)
-                
-                if day_match and month_num and year_match:
-                    day = int(day_match.group(1))
-                    year = int(year_match.group(1))
-                    parsed_date = datetime(year, month_num, day).date()
-                    logger.info(f"Parsed date '{date_text}' as {parsed_date}")
-                    return parsed_date
-                
-                # If we can't parse it, assume it's tomorrow
-                logger.warning(f"Could not parse date '{date_text}', assuming tomorrow")
-                return today + timedelta(days=1)
-        except Exception as e:
-            logger.error(f"Error parsing date header '{date_text}': {e}")
-            return datetime.now().date()
-
-    def _parse_time(self, time_str: str, match_date: datetime.date = None) -> Optional[datetime]:
-        """Parse time string from HLTV and intelligently determine the date"""
-        try:
-            # If no date provided, use today
-            if match_date is None:
-                match_date = datetime.now().date()
-            
-            # Format: "19:00"
-            if ':' in time_str:
-                hour, minute = map(int, time_str.split(':'))
-                match_time = datetime.combine(match_date, datetime.min.time())
-                match_time = match_time.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                
-                # If the match time is in the past (earlier today), assume it's tomorrow
-                now = datetime.now()
-                if match_time < now and match_date == now.date():
-                    match_time = match_time + timedelta(days=1)
-                    logger.debug(f"Match time {time_str} is in the past, moving to tomorrow: {match_time}")
-                
-                return match_time
-        except Exception as e:
-            logger.error(f"Error parsing time '{time_str}': {e}")
-        return None
-
-    def get_recent_results(self, hours: int = 24) -> List[Match]:
-        """Get recent results (approximately last 24 hours, no exact date filtering available)"""
-        try:
-            self._rate_limit()
-            response = self.session.get(HLTV_RESULTS_URL, timeout=10)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'lxml')
-            results = []
-            
-            # Find all result containers
-            result_containers = soup.find_all('div', class_='result-con')
-            
-            for container in result_containers[:20]:  # Limit to newest 20
-                try:
-                    result = self._parse_result_container(container)
-                    if result:
-                        results.append(result)
-                except Exception as e:
-                    logger.error(f"Error parsing a result: {e}")
-                    continue
-            
-            logger.info(f"Found {len(results)} results")
-            return results
-            
+            soup = self._get(HLTV_RESULTS_URL, timeout=10)
         except Exception as e:
             logger.error(f"Error fetching results: {e}")
             return []
+        results = self.parse_results_page(soup)[:limit]
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        return [r for r in results if r.time is None or r.time >= cutoff]
 
-    def _parse_result_container(self, container) -> Optional[Match]:
-        """Parse a result container"""
-        try:
-            # Match ID and URL
-            match_link = container.find('a', class_='a-reset')
-            if not match_link:
-                return None
-            
-            match_url = match_link.get('href', '')
-            match_id = match_url.split('/')[-2] if match_url else None
-            
-            if not match_id:
-                return None
-            
-            # Teams - they're in divs with class 'team'
-            team_divs = container.find_all('div', class_='team')
-            if len(team_divs) < 2:
-                return None
-            
-            team1_name = team_divs[0].text.strip()
-            team2_name = team_divs[1].text.strip()
-            
-            # Score - in td with class 'result-score'
-            result_score_td = container.find('td', class_='result-score')
-            if result_score_td:
-                # Extract score from spans
-                score_spans = result_score_td.find_all('span')
-                if len(score_spans) >= 2:
-                    score1 = score_spans[0].text.strip()
-                    score2 = score_spans[1].text.strip()
-                    score = f"{score1}-{score2}"
-                else:
-                    score = result_score_td.text.strip().replace('\n', '').replace(' ', '')
-            else:
-                score = "0-0"
-            
-            # Event - in span with class 'event-name'
-            event_span = container.find('span', class_='event-name')
-            event = event_span.text.strip() if event_span else "Unknown Event"
-            
-            # Stars - count i tags with class 'fa-star'
-            stars = 0
-            star_divs = container.find_all('i', class_='fa-star')
-            stars = len(star_divs)
-            
-            match = Match(
-                match_id=match_id,
-                team1=team1_name,
-                team2=team2_name,
-                event=event,
-                time=None,
-                stars=stars,
-                score=score,
-                status="finished"
-            )
-            
-            # Store match URL for link generation
-            match._match_url = match_url
-            match._scraper = self
-            
-            return match
-            
-        except Exception as e:
-            logger.error(f"Error parsing result container: {e}")
+    @classmethod
+    def parse_results_page(cls, soup: BeautifulSoup) -> List[Match]:
+        results, seen = [], set()
+        for container in soup.find_all('div', class_='result-con'):
+            try:
+                result = cls._parse_result_container(container)
+            except Exception as e:
+                logger.error(f"Error parsing result container: {e}")
+                continue
+            # The "featured results" block repeats matches from the main list
+            if result and result.match_id not in seen:
+                seen.add(result.match_id)
+                results.append(result)
+        return results
+
+    @staticmethod
+    def _parse_result_container(container) -> Optional[Match]:
+        link = container.find('a', class_='a-reset')
+        url_path = link.get('href', '') if link else ''
+        m = MATCH_URL_RE.match(url_path)
+        if not m:
             return None
+
+        team_divs = container.find_all('div', class_='team')
+        if len(team_divs) < 2:
+            return None
+        team1 = team_divs[0].get_text(strip=True)
+        team2 = team_divs[1].get_text(strip=True)
+
+        score = '0-0'
+        score_td = container.find('td', class_='result-score')
+        if score_td:
+            spans = score_td.find_all('span')
+            if len(spans) >= 2:
+                score = f"{spans[0].get_text(strip=True)}-{spans[1].get_text(strip=True)}"
+            else:
+                score = re.sub(r'\s+', '', score_td.get_text())
+
+        event_span = container.find('span', class_='event-name')
+        event = event_span.get_text(strip=True) if event_span else 'Unknown Event'
+
+        return Match(
+            match_id=m.group(1), team1=team1, team2=team2, event=event,
+            stars=len(container.find_all('i', class_='fa-star')),
+            url_path=url_path,
+            time=_from_unix_ms(container.get('data-zonedgrouping-entry-unix')),
+            score=score, status='finished',
+        )
+
+    # --- Teams --------------------------------------------------------------------
+
+    def refresh_teams(self) -> Set[str]:
+        """Scrape team names (world ranking + current matches) and merge them
+        into the database. Returns the names found in this run."""
+        teams: Set[str] = set()
+
+        rankings_url = self._rankings_url(datetime.now(TZ))
+        try:
+            soup = self._get(rankings_url)
+            names = soup.select('div.ranked-team span.name') or soup.select('span.name')
+            teams.update(n.get_text(strip=True) for n in names)
+            logger.info(f"Found {len(teams)} teams on {rankings_url}")
+        except Exception as e:
+            logger.warning(f"Could not load rankings ({rankings_url}): {e}")
+
+        # Also add teams from the match list to catch new / unranked teams
+        for match in self.get_upcoming_matches():
+            teams.update((match.team1, match.team2))
+
+        teams.discard('')
+        teams.discard('TBD')
+        if teams and self.db:
+            self.db.update_valid_teams(teams)
+        return teams
+
+    @staticmethod
+    def _rankings_url(now: datetime) -> str:
+        """HLTV publishes rankings each Monday: /ranking/teams/<year>/<month>/<day>."""
+        monday = now - timedelta(days=now.weekday())
+        return f"{HLTV_BASE_URL}/ranking/teams/{monday.year}/{monday.strftime('%B').lower()}/{monday.day}"
+
+    def search_team(self, team_name: str) -> Tuple[bool, str]:
+        """Validate a user-supplied team name against the known-team list.
+
+        Returns (True, canonical_name) or (False, input). Matching order:
+        exact (case-insensitive) → unique prefix → unique substring. Ambiguous
+        input is rejected rather than guessed.
+        """
+        name = team_name.strip()
+        query = name.casefold()
+        if not (2 <= len(query) <= 30) or query.isdigit():
+            return False, name
+
+        known = sorted(self.db.get_valid_teams()) if self.db else []
+        if not known:
+            logger.error(f"No known teams in database, cannot validate '{name}'")
+            return False, name
+
+        for team in known:
+            if team.casefold() == query:
+                return True, team
+        for candidates in (
+            [t for t in known if t.casefold().startswith(query)],
+            [t for t in known if query in t.casefold()],
+        ):
+            if len(candidates) == 1:
+                return True, candidates[0]
+            if candidates:
+                logger.info(f"'{name}' is ambiguous: {candidates[:5]}")
+                return False, name
+        return False, name
+
+    def suggest_teams(self, team_name: str, limit: int = 5) -> List[str]:
+        """Known teams containing the input, for "did you mean" hints."""
+        query = team_name.strip().casefold()
+        if len(query) < 2 or not self.db:
+            return []
+        return sorted(t for t in self.db.get_valid_teams() if query in t.casefold())[:limit]
